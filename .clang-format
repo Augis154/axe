@@ -1,0 +1,17 @@
+---
+BasedOnStyle: LLVM
+Language: C
+UseTab: Never
+TabWidth: 2
+IndentWidth: 2
+ContinuationIndentWidth: 2
+AlignOperands: true
+ColumnLimit: 120
+NamespaceIndentation: Inner
+PointerAlignment: Right
+SortIncludes: true
+AlignEscapedNewlines: LeftWithLastLine
+AlignArrayOfStructures: None
+BinPackArguments: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Empty
