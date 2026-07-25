@@ -12,6 +12,9 @@ typedef enum {
   TOKEN_STAR,  // *
   TOKEN_SLASH, // /
 
+  TOKEN_OPAREN, // (
+  TOKEN_CPAREN, // )
+
   // Literals
   TOKEN_IDENT,
 
@@ -25,6 +28,8 @@ typedef enum {
 
 typedef struct {
   TokenType type;
+
+  size_t line;
 
   const char *lexeme;
   size_t lexeme_len;

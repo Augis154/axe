@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "ast.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,9 +49,47 @@ static const BinaryOp get_binary_op(TokenType type) {
   return token_to_binary_op[type];
 }
 
+static void error_at(Parser *parser, Token token, const char *message) {
+  if (parser->panic_mode) {
+    return;
+  }
+  parser->panic_mode = true;
+
+  fprintf(stderr, "[line %zu] Error", token.line);
+
+  if (token.type == TOKEN_EOF) {
+    fprintf(stderr, " at end");
+  } else if (token.type == TOKEN_ERROR) {
+    // Nothing to print
+  } else {
+    fprintf(stderr, " at '%.*s'", (int)token.lexeme_len, token.lexeme);
+  }
+
+  fprintf(stderr, ": %s\n", message);
+
+  parser->had_error = true;
+}
+
 static void advance(Parser *parser) {
   parser->current = parser->next;
-  parser->next = lexer_get_token(parser->lexer);
+
+  for (;;) {
+    parser->next = lexer_get_token(parser->lexer);
+
+    if (parser->next.type != TOKEN_ERROR) {
+      break;
+    }
+
+    error_at(parser, parser->next, parser->next.lexeme);
+  }
+}
+
+static bool match(Parser *parser, TokenType type) {
+  if (parser->next.type == type) {
+    advance(parser);
+    return true;
+  }
+  return false;
 }
 
 static AstNode *parse_precedence(Parser *parser, Precedence precedence) {
@@ -59,6 +98,7 @@ static AstNode *parse_precedence(Parser *parser, Precedence precedence) {
 
   if (!prefix_rule) {
     // Handle error: no prefix rule for this token
+    error_at(parser, parser->current, "Expected expression.");
     return NULL;
   }
 
@@ -91,6 +131,17 @@ static AstNode *parse_identifier(Parser *parser) {
   size_t length = parser->current.lexeme_len;
   node->identifier.name = strndup(parser->current.lexeme, length);
   return node;
+}
+
+static AstNode *parse_grouping(Parser *parser) {
+  AstNode *expr = parse_expression(parser);
+
+  if (!match(parser, TOKEN_CPAREN)) {
+    error_at(parser, parser->next, "Expected ')' after expression");
+    return NULL;
+  }
+
+  return expr;
 }
 
 static AstNode *parse_unary(Parser *parser) {
@@ -140,6 +191,8 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
   [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
   [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
+
+  [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
 };
 
 static const UnaryOp token_to_unary_op[TOKEN_COUNT] = {
