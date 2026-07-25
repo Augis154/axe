@@ -72,6 +72,7 @@ static void begin_token(Lexer *lex) {
 static Token new_token(Lexer *lex, TokenType type) {
   Token token;
   token.type = type;
+  token.line = lex->line;
   token.lexeme = lex->token_start;
   token.lexeme_len = (size_t)(lex->current - lex->token_start);
   return token;
@@ -79,6 +80,7 @@ static Token new_token(Lexer *lex, TokenType type) {
 
 static Token error_token(Lexer *lex, const char *message) {
   Token token;
+  token.line = lex->line;
   token.type = TOKEN_ERROR;
   token.lexeme = message;
   token.lexeme_len = strlen(message);
@@ -120,6 +122,11 @@ Token lexer_get_token(Lexer *lex) {
   char c = advance(lex);
 
   switch (c) {
+  case '(':
+    return new_token(lex, TOKEN_OPAREN);
+  case ')':
+    return new_token(lex, TOKEN_CPAREN);
+
   case '+':
     return new_token(lex, TOKEN_PLUS);
   case '-':
