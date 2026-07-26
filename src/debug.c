@@ -1,4 +1,5 @@
 #include "debug.h"
+#include "ast.h"
 
 #include <stdio.h>
 
@@ -9,51 +10,53 @@ static void print_indent(int indent) {
   printf("%*s", indent * 2, "");
 }
 
-static void print_ast_node(AstNode *node, int indent);
+static void print_ast_node(AstArena *arena, AstId node_id, int indent);
 
-static void print_ast_field(const char *label, AstNode *node, int indent) {
+static void print_ast_field(const char *label, AstArena *arena, AstId node_id, int indent) {
   print_indent(indent);
   printf("%s\n", label);
-  if (node) {
-    print_ast_node(node, indent + 1);
+  if (node_id != AST_NULL_ID) {
+    print_ast_node(arena, node_id, indent + 1);
   } else {
     print_indent(indent + 1);
     printf("<null>\n");
   }
 }
 
-static void print_ast_node(AstNode *node, int indent) {
-  if (!node) {
+static void print_ast_node(AstArena *arena, AstId node_id, int indent) {
+  if (node_id == AST_NULL_ID) {
     print_indent(indent);
     printf("<null>\n");
     return;
   }
 
+  AstNode node = arena->nodes[node_id];
+
   print_indent(indent);
 
-  switch (node->type) {
+  switch (node.type) {
   case AST_INVALID:
     printf("Invalid\n");
     break;
   case AST_LITERAL:
-    printf("Literal: %ld\n", node->literal.value);
+    printf("Literal: %ld\n", node.literal.value);
     break;
   case AST_IDENTIFIER:
-    printf("Identifier: %s\n", node->identifier.name);
+    printf("Identifier: %s\n", node.identifier.name);
     break;
 
   case AST_UNARY_OP:
-    printf("Unary Op: '%s'\n", unop_strings[node->expr_unary.op]);
-    print_ast_field("Operand:", node->expr_unary.operand, indent + 1);
+    printf("Unary Op: '%s'\n", unop_strings[node.expr_unary.op]);
+    print_ast_field("Operand:", arena, node.expr_unary.operand, indent + 1);
     break;
   case AST_BINARY_OP:
-    printf("Binary Op: '%s'\n", binop_strings[node->expr_binary.op]);
-    print_ast_field("Left:", node->expr_binary.left, indent + 1);
-    print_ast_field("Right:", node->expr_binary.right, indent + 1);
+    printf("Binary Op: '%s'\n", binop_strings[node.expr_binary.op]);
+    print_ast_field("Left:", arena, node.expr_binary.left, indent + 1);
+    print_ast_field("Right:", arena, node.expr_binary.right, indent + 1);
     break;
 
   default:
-    printf("Unknown node type: %d\n", node->type);
+    printf("Unknown node type: %d\n", node.type);
     break;
   }
 }
@@ -72,33 +75,35 @@ void debug_print_token(Token token) {
   }
 }
 
-void debug_print_ast(AstNode *root) {
-  print_ast_node(root, 0);
+void debug_print_ast_tree(AstArena *arena, AstId root) {
+  print_ast_node(arena, root, 0);
 }
 
-void debug_print_ast_sexpr(AstNode *root) {
-  if (!root) {
+void debug_print_ast_sexpr(AstArena *arena, AstId root) {
+  if (root == AST_NULL_ID) {
     printf("<null>\n");
     return;
   }
 
-  switch (root->type) {
+  AstNode *node = &arena->nodes[root];
+
+  switch (node->type) {
   case AST_LITERAL:
-    printf("%ld", root->literal.value);
+    printf("%ld", node->literal.value);
     break;
   case AST_IDENTIFIER:
-    printf("%s", root->identifier.name);
+    printf("%s", node->identifier.name);
     break;
   case AST_UNARY_OP:
-    printf("(%s ", unop_strings[root->expr_unary.op]);
-    debug_print_ast_sexpr(root->expr_unary.operand);
+    printf("(%s ", unop_strings[node->expr_unary.op]);
+    debug_print_ast_sexpr(arena, node->expr_unary.operand);
     printf(")");
     break;
   case AST_BINARY_OP:
-    printf("(%s ", binop_strings[root->expr_binary.op]);
-    debug_print_ast_sexpr(root->expr_binary.left);
+    printf("(%s ", binop_strings[node->expr_binary.op]);
+    debug_print_ast_sexpr(arena, node->expr_binary.left);
     printf(" ");
-    debug_print_ast_sexpr(root->expr_binary.right);
+    debug_print_ast_sexpr(arena, node->expr_binary.right);
     printf(")");
     break;
   default:

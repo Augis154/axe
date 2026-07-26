@@ -14,8 +14,8 @@ typedef enum {
   PREC_CALL,       // . () []
 } Precedence;
 
-typedef AstNode *(*ParsePrefixFn)(Parser *parser);
-typedef AstNode *(*ParseInfixFn)(Parser *parser, AstNode *left);
+typedef AstId (*ParsePrefixFn)(Parser *parser);
+typedef AstId (*ParseInfixFn)(Parser *parser, AstId left);
 
 typedef struct {
   Precedence precedence;
@@ -47,6 +47,13 @@ static const BinaryOp get_binary_op(TokenType type) {
     return -1; // Invalid BinaryOp
   }
   return token_to_binary_op[type];
+}
+
+static AstNode *get_ast_node(Parser *parser, AstId id) {
+  if (id < 0 || id >= parser->ast_arena->count) {
+    return NULL;
+  }
+  return &parser->ast_arena->nodes[id];
 }
 
 static void error_at(Parser *parser, Token token, const char *message) {
@@ -92,17 +99,17 @@ static bool match(Parser *parser, TokenType type) {
   return false;
 }
 
-static AstNode *parse_precedence(Parser *parser, Precedence precedence) {
+static AstId parse_precedence(Parser *parser, Precedence precedence) {
   advance(parser);
   ParsePrefixFn prefix_rule = get_rule(parser->current.type)->prefix;
 
   if (!prefix_rule) {
     // Handle error: no prefix rule for this token
     error_at(parser, parser->current, "Expected expression.");
-    return NULL;
+    return AST_NULL_ID;
   }
 
-  AstNode *left = prefix_rule(parser);
+  AstId left = prefix_rule(parser);
 
   while (precedence <= get_rule(parser->next.type)->precedence) {
     advance(parser);
@@ -119,67 +126,76 @@ static AstNode *parse_precedence(Parser *parser, Precedence precedence) {
   return left;
 }
 
-static AstNode *parse_number(Parser *parser) {
-  AstNode *node = ast_node_new(AST_LITERAL);
+static AstId parse_number(Parser *parser) {
+  AstId node_id = ast_node_new(parser->ast_arena, AST_LITERAL);
+  AstNode *node = get_ast_node(parser, node_id);
+
   node->literal.value = strtoll(parser->current.lexeme, NULL, 10);
-  return node;
+  return node_id;
 }
 
-static AstNode *parse_identifier(Parser *parser) {
-  AstNode *node = ast_node_new(AST_IDENTIFIER);
+static AstId parse_identifier(Parser *parser) {
+  AstId node_id = ast_node_new(parser->ast_arena, AST_IDENTIFIER);
+  AstNode *node = get_ast_node(parser, node_id);
 
   size_t length = parser->current.lexeme_len;
   node->identifier.name = strndup(parser->current.lexeme, length);
-  return node;
+  return node_id;
 }
 
-static AstNode *parse_grouping(Parser *parser) {
-  AstNode *expr = parse_expression(parser);
+static AstId parse_grouping(Parser *parser) {
+  AstId node_id = parse_expression(parser);
 
   if (!match(parser, TOKEN_CPAREN)) {
     error_at(parser, parser->next, "Expected ')' after expression");
-    return NULL;
+    return AST_NULL_ID;
   }
 
-  return expr;
+  return node_id;
 }
 
-static AstNode *parse_unary(Parser *parser) {
+static AstId parse_unary(Parser *parser) {
   TokenType operator = parser->current.type;
   const ParseRule *rule = get_rule(operator);
 
-  AstNode *operand = parse_precedence(parser, PREC_UNARY);
+  AstId op_id = parse_precedence(parser, PREC_UNARY);
 
-  AstNode *unary_expr = ast_node_new(AST_UNARY_OP);
-  unary_expr->expr_unary.op = get_unary_op(operator);
-  unary_expr->expr_unary.operand = operand;
+  AstId unary_id = ast_node_new(parser->ast_arena, AST_UNARY_OP);
+  AstNode *unary = get_ast_node(parser, unary_id);
 
-  return unary_expr;
+  unary->expr_unary.op = get_unary_op(operator);
+  unary->expr_unary.operand = op_id;
+
+  return unary_id;
 }
 
-static AstNode *parse_binary(Parser *parser, AstNode *left) {
+static AstId parse_binary(Parser *parser, AstId left) {
   TokenType operator = parser->current.type;
   const ParseRule *rule = get_rule(operator);
 
-  AstNode *right = parse_precedence(parser, rule->precedence + 1);
+  AstId right = parse_precedence(parser, rule->precedence + 1);
 
-  AstNode *binary_expr = ast_node_new(AST_BINARY_OP);
-  binary_expr->expr_binary.op = get_binary_op(operator);
-  binary_expr->expr_binary.left = left;
-  binary_expr->expr_binary.right = right;
+  AstId binary_id = ast_node_new(parser->ast_arena, AST_BINARY_OP);
+  AstNode *binary = get_ast_node(parser, binary_id);
 
-  return binary_expr;
+  binary->expr_binary.op = get_binary_op(operator);
+  binary->expr_binary.left = left;
+  binary->expr_binary.right = right;
+
+  return binary_id;
 }
 
-void parser_init(Parser *parser, Lexer *lexer) {
+void parser_init(Parser *parser, Lexer *lexer, AstArena *arena) {
   parser->lexer = lexer;
+  parser->ast_arena = arena;
+
   parser->had_error = false;
   parser->panic_mode = false;
 
   advance(parser);
 }
 
-AstNode *parse_expression(Parser *parser) {
+AstId parse_expression(Parser *parser) {
   return parse_precedence(parser, PREC_ASSIGNMENT);
 }
 
