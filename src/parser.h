@@ -8,6 +8,7 @@
 
 typedef struct {
   Lexer *lexer;
+  AstArena *ast_arena;
 
   Token current;
   Token next;
@@ -16,8 +17,8 @@ typedef struct {
   bool panic_mode;
 } Parser;
 
-void parser_init(Parser *parser, Lexer *lexer);
+void parser_init(Parser *parser, Lexer *lexer, AstArena *arena);
 
-AstNode *parse_expression(Parser *parser);
+AstId parse_expression(Parser *parser);
 
 #endif // PARSER_H

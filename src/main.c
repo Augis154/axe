@@ -1,3 +1,4 @@
+#include "ast.h"
 #include "debug.h"
 #include "lexer.h"
 #include "parser.h"
@@ -11,14 +12,17 @@ int main(int argc, char **argv) {
   Lexer lexer;
   lexer_init(&lexer, source, strlen(source));
 
+  AstArena ast_arena;
+  ast_arena_init(&ast_arena);
+
   Parser parser;
-  parser_init(&parser, &lexer);
+  parser_init(&parser, &lexer, &ast_arena);
 
-  AstNode *expr = parse_expression(&parser);
+  AstId root = parse_expression(&parser);
 
-  debug_print_ast(expr);
+  debug_print_ast_tree(&ast_arena, root);
 
-  debug_print_ast_sexpr(expr);
+  debug_print_ast_sexpr(&ast_arena, root);
   printf("\n");
 
   printf("Parser had error: %s\n", parser.had_error ? "true" : "false");
@@ -31,4 +35,6 @@ int main(int argc, char **argv) {
   //     break;
   //   }
   // }
+
+  ast_arena_free(&ast_arena);
 }

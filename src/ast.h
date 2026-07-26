@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define AST_NULL_ID ((AstId)0)
+
+typedef size_t AstId;
+
 typedef enum {
   UNARYOP_NEGATE,
 
@@ -29,8 +33,6 @@ typedef enum {
   AST_BINARY_OP,
 } AstNodeType;
 
-typedef struct AstNode_ AstNode;
-
 typedef struct {
   int64_t value;
 } AstLiteral;
@@ -43,16 +45,16 @@ typedef struct {
 
 typedef struct {
   UnaryOp op;
-  AstNode *operand;
+  AstId operand;
 } AstExprUnary;
 
 typedef struct {
   BinaryOp op;
-  AstNode *left;
-  AstNode *right;
+  AstId left;
+  AstId right;
 } AstExprBinary;
 
-struct AstNode_ {
+typedef struct {
   AstNodeType type;
 
   union {
@@ -62,8 +64,17 @@ struct AstNode_ {
     AstExprUnary expr_unary;
     AstExprBinary expr_binary;
   };
-};
+} AstNode;
 
-AstNode *ast_node_new(AstNodeType type);
+typedef struct {
+  AstNode *nodes;
+  size_t count;
+  size_t capacity;
+} AstArena;
+
+void ast_arena_init(AstArena *arena);
+void ast_arena_free(AstArena *arena);
+
+AstId ast_node_new(AstArena *arena, AstNodeType type);
 
 #endif // AST_H
