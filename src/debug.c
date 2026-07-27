@@ -94,11 +94,13 @@ void debug_print_ast_sexpr(AstArena *arena, AstId root) {
   case AST_IDENTIFIER:
     printf("%s", node->identifier.name);
     break;
+
   case AST_UNARY_OP:
     printf("(%s ", unop_strings[node->expr_unary.op]);
     debug_print_ast_sexpr(arena, node->expr_unary.operand);
     printf(")");
     break;
+
   case AST_BINARY_OP:
     printf("(%s ", binop_strings[node->expr_binary.op]);
     debug_print_ast_sexpr(arena, node->expr_binary.left);
@@ -106,8 +108,51 @@ void debug_print_ast_sexpr(AstArena *arena, AstId root) {
     debug_print_ast_sexpr(arena, node->expr_binary.right);
     printf(")");
     break;
+
   default:
     printf("<unknown node type>");
+  }
+}
+
+void debug_print_ir_buffer(IrBuffer *buffer) {
+  for (size_t i = 0; i < buffer->count; i++) {
+    IrInstr *inst = &buffer->insts[i];
+
+    switch (inst->op) {
+    case IR_INST_NONE:
+      printf("%zu: <none>\n", i);
+      break;
+
+    case IR_INST_LOAD_LITERAL:
+      printf("%zu: r%u = %ld\n", i, inst->res.id, inst->literal);
+      break;
+    case IR_INST_LOAD_VAR:
+      printf("%zu: r%u = LOAD_VAR(var_id=%u)\n", i, inst->res.id, inst->arg1.id);
+      break;
+
+      // Unary operations
+    case IR_INST_NEGATE:
+      printf("%zu: r%u = -r%u\n", i, inst->res.id, inst->arg1.id);
+      break;
+
+      // Binary operations
+    case IR_INST_ADD:
+      printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_SUB:
+      printf("%zu: r%u = r%u - r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_MUL:
+      printf("%zu: r%u = r%u * r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_DIV:
+      printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+
+    default:
+      printf("%zu: Unknown instruction\n", i);
+      break;
+    }
   }
 }
 
