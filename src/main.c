@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "backend.h"
 #include "debug.h"
 #include "frontend.h"
 #include "ir.h"
@@ -37,6 +38,8 @@ int main(int argc, char **argv) {
   emit_ir(&ir_context, root);
 
   debug_print_ir_buffer(&ir_context);
+
+  generate_qbe("out.ssa", &ir_context);
 
   ir_buffer_free(&ir_context);
 
