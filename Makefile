@@ -1,20 +1,26 @@
 CFLAGS = -ggdb
 
-SRC = $(wildcard src/*.c)
-OBJ = $(patsubst src/%.c, build/%.o, $(SRC))
+CURRENT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+BUILD_DIR = build
+
+# SRC = $(wildcard src/*/*.c)
+SRC = $(shell find src -name '*.c' -print)
+OBJ = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 all: axc
 
-$(OBJ): build/%.o: src/%.c | build
-	gcc $(CFLAGS) -c $< -o $@
+$(OBJ): $(BUILD_DIR)/%.o: src/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 axc: $(OBJ)
 	gcc $(CFLAGS) $^ -o axc
 
-build:
-	mkdir -p build
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+	mkdir -p $(patsubst src/%,$(BUILD_DIR)/%,$(sort $(dir $(SRC))))
 
 .PHONY: clean
 
 clean:
-	rm -r build
+	rm -r $(BUILD_DIR)

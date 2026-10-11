@@ -5,11 +5,11 @@ UseTab: Never
 TabWidth: 2
 IndentWidth: 2
 ContinuationIndentWidth: 2
-AlignOperands: true
+AlignOperands: "Align"
 ColumnLimit: 120
 NamespaceIndentation: Inner
 PointerAlignment: Right
-SortIncludes: true
+SortIncludes.Enabled: true
 AlignEscapedNewlines: LeftWithLastLine
 AlignArrayOfStructures: None
 BinPackArguments: false

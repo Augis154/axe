@@ -2,14 +2,14 @@
 #define DEBUG_H
 
 #include "ast.h"
+#include "frontend.h"
 #include "ir.h"
-#include "lexer.h"
 
 void debug_print_token(Token token);
 
-void debug_print_ast_tree(AstArena *arena, AstId root);
-void debug_print_ast_sexpr(AstArena *arena, AstId root);
+void debug_print_ast_tree(Arena *arena, AstExpr *root);
+void debug_print_ast_sexpr(Arena *arena, AstExpr *root);
 
-void debug_print_ir_buffer(IrBuffer *buffer);
+void debug_print_ir_buffer(IrContext *ir_ctx);
 
 #endif // DEBUG_H

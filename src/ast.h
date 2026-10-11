@@ -1,12 +1,12 @@
 #ifndef AST_H
 #define AST_H
 
+#include "lib/arena.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-#define AST_NULL_ID ((AstId)0)
-
-typedef size_t AstId;
+typedef struct AstExpr_ AstExpr;
 
 typedef enum {
   UNARYOP_NEGATE,
@@ -24,13 +24,13 @@ typedef enum {
 } BinaryOp;
 
 typedef enum {
-  AST_INVALID,
+  EXPR_INVALID,
 
-  AST_LITERAL,
-  AST_IDENTIFIER,
+  EXPR_LITERAL,
+  EXPR_IDENTIFIER,
 
-  AST_UNARY_OP,
-  AST_BINARY_OP,
+  EXPR_UNARY,
+  EXPR_BINARY,
 } AstNodeType;
 
 typedef struct {
@@ -45,16 +45,16 @@ typedef struct {
 
 typedef struct {
   UnaryOp op;
-  AstId operand;
+  AstExpr *operand;
 } AstExprUnary;
 
 typedef struct {
   BinaryOp op;
-  AstId left;
-  AstId right;
+  AstExpr *left;
+  AstExpr *right;
 } AstExprBinary;
 
-typedef struct {
+struct AstExpr_ {
   AstNodeType type;
 
   union {
@@ -64,17 +64,10 @@ typedef struct {
     AstExprUnary expr_unary;
     AstExprBinary expr_binary;
   };
-} AstNode;
+};
 
-typedef struct {
-  AstNode *nodes;
-  size_t count;
-  size_t capacity;
-} AstArena;
+void ast_arena_free(Arena *arena);
 
-void ast_arena_init(AstArena *arena);
-void ast_arena_free(AstArena *arena);
-
-AstId ast_node_new(AstArena *arena, AstNodeType type);
+AstExpr *ast_expr_new(Arena *arena, AstNodeType type);
 
 #endif // AST_H
