@@ -24,3 +24,8 @@ $(BUILD_DIR):
 
 clean:
 	rm -r $(BUILD_DIR)
+
+compile: all
+	./axc expr.ax
+	qbe out.ssa -o out.s
+	gcc out.s -o out
