@@ -1,5 +1,5 @@
-#include "parser.h"
 #include "ast.h"
+#include "frontend.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,8 +14,8 @@ typedef enum {
   PREC_CALL,       // . () []
 } Precedence;
 
-typedef AstId (*ParsePrefixFn)(Parser *parser);
-typedef AstId (*ParseInfixFn)(Parser *parser, AstId left);
+typedef AstExpr *(*ParsePrefixFn)(Parser *parser);
+typedef AstExpr *(*ParseInfixFn)(Parser *parser, AstExpr *left);
 
 typedef struct {
   Precedence precedence;
@@ -47,13 +47,6 @@ static const BinaryOp get_binary_op(TokenType type) {
     return -1; // Invalid BinaryOp
   }
   return token_to_binary_op[type];
-}
-
-static AstNode *get_ast_node(Parser *parser, AstId id) {
-  if (id < 0 || id >= parser->ast_arena->count) {
-    return NULL;
-  }
-  return &parser->ast_arena->nodes[id];
 }
 
 static void error_at(Parser *parser, Token token, const char *message) {
@@ -99,17 +92,17 @@ static bool match(Parser *parser, TokenType type) {
   return false;
 }
 
-static AstId parse_precedence(Parser *parser, Precedence precedence) {
+static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
   advance(parser);
   ParsePrefixFn prefix_rule = get_rule(parser->current.type)->prefix;
 
   if (!prefix_rule) {
     // Handle error: no prefix rule for this token
     error_at(parser, parser->current, "Expected expression.");
-    return AST_NULL_ID;
+    return NULL;
   }
 
-  AstId left = prefix_rule(parser);
+  AstExpr *left = prefix_rule(parser);
 
   while (precedence <= get_rule(parser->next.type)->precedence) {
     advance(parser);
@@ -126,66 +119,60 @@ static AstId parse_precedence(Parser *parser, Precedence precedence) {
   return left;
 }
 
-static AstId parse_number(Parser *parser) {
-  AstId node_id = ast_node_new(parser->ast_arena, AST_LITERAL);
-  AstNode *node = get_ast_node(parser, node_id);
+static AstExpr *parse_number(Parser *parser) {
+  AstExpr *expr = ast_expr_new(parser->ast_arena, EXPR_LITERAL);
 
-  node->literal.value = strtoll(parser->current.lexeme, NULL, 10);
-  return node_id;
+  expr->literal.value = strtoll(parser->current.lexeme, NULL, 10);
+  return expr;
 }
 
-static AstId parse_identifier(Parser *parser) {
-  AstId node_id = ast_node_new(parser->ast_arena, AST_IDENTIFIER);
-  AstNode *node = get_ast_node(parser, node_id);
+static AstExpr *parse_identifier(Parser *parser) {
+  AstExpr *expr = ast_expr_new(parser->ast_arena, EXPR_IDENTIFIER);
 
   size_t length = parser->current.lexeme_len;
-  node->identifier.name = strndup(parser->current.lexeme, length);
-  return node_id;
+  expr->identifier.name = strndup(parser->current.lexeme, length);
+  return expr;
 }
 
-static AstId parse_grouping(Parser *parser) {
-  AstId node_id = parse_expression(parser);
+static AstExpr *parse_grouping(Parser *parser) {
+  AstExpr *expr = parse_expression(parser);
 
   if (!match(parser, TOKEN_CPAREN)) {
     error_at(parser, parser->next, "Expected ')' after expression");
-    return AST_NULL_ID;
+    return NULL;
   }
 
-  return node_id;
+  return expr;
 }
 
-static AstId parse_unary(Parser *parser) {
-  TokenType operator = parser->current.type;
+static AstExpr *parse_unary(Parser *parser) {
+  TokenType operator= parser->current.type;
   const ParseRule *rule = get_rule(operator);
 
-  AstId op_id = parse_precedence(parser, PREC_UNARY);
+  AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
 
-  AstId unary_id = ast_node_new(parser->ast_arena, AST_UNARY_OP);
-  AstNode *unary = get_ast_node(parser, unary_id);
+  AstExpr *unary_expr = ast_expr_new(parser->ast_arena, EXPR_UNARY);
+  unary_expr->expr_unary.op = get_unary_op(operator);
+  unary_expr->expr_unary.operand = op_expr;
 
-  unary->expr_unary.op = get_unary_op(operator);
-  unary->expr_unary.operand = op_id;
-
-  return unary_id;
+  return unary_expr;
 }
 
-static AstId parse_binary(Parser *parser, AstId left) {
-  TokenType operator = parser->current.type;
+static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
+  TokenType operator= parser->current.type;
   const ParseRule *rule = get_rule(operator);
 
-  AstId right = parse_precedence(parser, rule->precedence + 1);
+  AstExpr *right = parse_precedence(parser, rule->precedence + 1);
 
-  AstId binary_id = ast_node_new(parser->ast_arena, AST_BINARY_OP);
-  AstNode *binary = get_ast_node(parser, binary_id);
+  AstExpr *binary_expr = ast_expr_new(parser->ast_arena, EXPR_BINARY);
+  binary_expr->expr_binary.op = get_binary_op(operator);
+  binary_expr->expr_binary.left = left;
+  binary_expr->expr_binary.right = right;
 
-  binary->expr_binary.op = get_binary_op(operator);
-  binary->expr_binary.left = left;
-  binary->expr_binary.right = right;
-
-  return binary_id;
+  return binary_expr;
 }
 
-void parser_init(Parser *parser, Lexer *lexer, AstArena *arena) {
+void parser_init(Parser *parser, Lexer *lexer, Arena *arena) {
   parser->lexer = lexer;
   parser->ast_arena = arena;
 
@@ -195,29 +182,29 @@ void parser_init(Parser *parser, Lexer *lexer, AstArena *arena) {
   advance(parser);
 }
 
-AstId parse_expression(Parser *parser) {
+AstExpr *parse_expression(Parser *parser) {
   return parse_precedence(parser, PREC_ASSIGNMENT);
 }
 
 static const ParseRule rules[TOKEN_COUNT] = {
-  [TOKEN_NUMBER] = {PREC_NONE, parse_number, NULL},
-  [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
+    [TOKEN_NUMBER] = {PREC_NONE, parse_number, NULL},
+    [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
 
-  [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
-  [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
-  [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
+    [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},
+    [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
+    [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
+    [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
 
-  [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
+    [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
 };
 
 static const UnaryOp token_to_unary_op[TOKEN_COUNT] = {
-  [TOKEN_MINUS] = UNARYOP_NEGATE,
+    [TOKEN_MINUS] = UNARYOP_NEGATE,
 };
 
 static const BinaryOp token_to_binary_op[TOKEN_COUNT] = {
-  [TOKEN_PLUS] = BINARYOP_ADD,
-  [TOKEN_MINUS] = BINARYOP_SUB,
-  [TOKEN_STAR] = BINARYOP_MUL,
-  [TOKEN_SLASH] = BINARYOP_DIV,
+    [TOKEN_PLUS] = BINARYOP_ADD,
+    [TOKEN_MINUS] = BINARYOP_SUB,
+    [TOKEN_STAR] = BINARYOP_MUL,
+    [TOKEN_SLASH] = BINARYOP_DIV,
 };

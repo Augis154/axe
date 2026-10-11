@@ -1,8 +1,7 @@
 #include "ast.h"
 #include "debug.h"
+#include "frontend.h"
 #include "ir.h"
-#include "lexer.h"
-#include "parser.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,13 +12,12 @@ int main(int argc, char **argv) {
   Lexer lexer;
   lexer_init(&lexer, source, strlen(source));
 
-  AstArena ast_arena;
-  ast_arena_init(&ast_arena);
+  Arena ast_arena = {0};
 
   Parser parser;
   parser_init(&parser, &lexer, &ast_arena);
 
-  AstId root = parse_expression(&parser);
+  AstExpr *root = parse_expression(&parser);
 
   // debug_print_ast_tree(&ast_arena, root);
 
@@ -33,17 +31,14 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  IrBuffer ir_buffer;
-  ir_buffer_init(&ir_buffer);
-
   IrContext ir_context;
-  ir_gen_init(&ir_context, &ir_buffer, &ast_arena);
+  ir_gen_init(&ir_context, &ast_arena);
 
   emit_ir(&ir_context, root);
 
-  debug_print_ir_buffer(&ir_buffer);
+  debug_print_ir_buffer(&ir_context);
 
-  ir_buffer_free(&ir_buffer);
+  ir_buffer_free(&ir_context);
 
   // while (1) {
   //   Token token = lexer_get_token(&lexer);

@@ -1,6 +1,9 @@
-#ifndef LEXER_H
-#define LEXER_H
+#ifndef FRONTEND_H
+#define FRONTEND_H
 
+#include "ast.h"
+
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef enum {
@@ -45,10 +48,24 @@ typedef struct {
   size_t line;
 } Lexer;
 
+typedef struct {
+  Lexer *lexer;
+  Arena *ast_arena;
+
+  Token current;
+  Token next;
+
+  bool had_error;
+  bool panic_mode;
+} Parser;
+
 void lexer_init(Lexer *lex, const char *source, size_t length);
+void parser_init(Parser *parser, Lexer *lexer, Arena *arena);
 
 Token lexer_get_token(Lexer *lex);
 
 const char *lexer_render_token_type(TokenType type);
 
-#endif // LEXER_H
+AstExpr *parse_expression(Parser *parser);
+
+#endif // FRONTEND_H

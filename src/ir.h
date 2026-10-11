@@ -40,23 +40,15 @@ typedef struct {
 } IrInstr;
 
 typedef struct {
-  IrInstr *insts;
-  size_t count;
-  size_t capacity;
-} IrBuffer;
-
-typedef struct {
-  IrBuffer *buffer;
-  AstArena *ast_arena;
+  IrInstr *buffer;
+  Arena *ast_arena;
 
   uint32_t next_reg;
 } IrContext;
 
-void ir_buffer_init(IrBuffer *buffer);
-void ir_buffer_free(IrBuffer *buffer);
+void ir_gen_init(IrContext *context, Arena *ast_arena);
+void ir_buffer_free(IrContext *context);
 
-void ir_gen_init(IrContext *context, IrBuffer *buffer, AstArena *ast_arena);
-
-void emit_ir(IrContext *context, AstId root_id);
+void emit_ir(IrContext *context, AstExpr *root);
 
 #endif // IR_H
