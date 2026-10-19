@@ -3,12 +3,17 @@
 #include "debug.h"
 #include "frontend.h"
 #include "ir.h"
+#include "lib/str_table.h"
 
 #include <stdio.h>
 #include <string.h>
 
 int main(int argc, char **argv) {
-  char *source = "(1+2)*3--4";
+  // char *source = "(1+2)*3--4;";
+  char *source = "x: int = 1+2;";
+
+  StrTable symbol_table;
+  st_init(&symbol_table, 1024);
 
   Lexer lexer;
   lexer_init(&lexer, source, strlen(source));
@@ -18,11 +23,11 @@ int main(int argc, char **argv) {
   Parser parser;
   parser_init(&parser, &lexer, &ast_arena);
 
-  AstExpr *root = parse_expression(&parser);
+  AstStmt *root = parse_statement(&parser);
 
   // debug_print_ast_tree(&ast_arena, root);
 
-  debug_print_ast_sexpr(&ast_arena, root);
+  debug_print_ast_stmt(&ast_arena, root);
   printf("\n");
 
   printf("Parser had error: %s\n", parser.had_error ? "true" : "false");

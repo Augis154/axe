@@ -7,8 +7,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define next_reg(context)                                                      \
-  (IrReg) { .id = (context)->next_reg++ }
+#define next_reg(context)       \
+  (IrReg) {                     \
+    .id = (context)->next_reg++ \
+  }
+
+// Expression handling
 
 static IrReg handle_expression(IrContext *context, AstExpr *node);
 
@@ -42,9 +46,9 @@ static IrReg handle_literal(IrContext *context, AstExpr *node) {
   IrReg res = next_reg(context);
 
   IrInstr inst = {
-      .op = IR_INST_LOAD_LITERAL,
-      .res = res,
-      .literal = node->literal.value,
+    .op = IR_INST_LOAD_LITERAL,
+    .res = res,
+    .literal = node->literal.value,
   };
   da_append(context->buffer, inst);
 
@@ -57,9 +61,9 @@ static IrReg handle_unary_op(IrContext *context, AstExpr *node) {
   IrReg res = next_reg(context);
 
   IrInstr inst = {
-      .op = get_unary_ir_op(node->expr_unary.op),
-      .res = res,
-      .arg1 = operand,
+    .op = get_unary_ir_op(node->expr_unary.op),
+    .res = res,
+    .arg1 = operand,
   };
   da_append(context->buffer, inst);
 
@@ -73,10 +77,10 @@ static IrReg handle_binary_op(IrContext *context, AstExpr *node) {
   IrReg res = next_reg(context);
 
   IrInstr inst = {
-      .op = get_binary_ir_op(node->expr_binary.op),
-      .res = res,
-      .arg1 = left,
-      .arg2 = right,
+    .op = get_binary_ir_op(node->expr_binary.op),
+    .res = res,
+    .arg1 = left,
+    .arg2 = right,
   };
   da_append(context->buffer, inst);
 
@@ -99,13 +103,50 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
     return handle_binary_op(context, node);
 
   default:
-    fprintf(stderr, "gen_ir_expression: unhandled AST node type %d\n",
-            node->type);
+    fprintf(stderr, "gen_ir_expression: unhandled AST node type %d\n", node->type);
     exit(EXIT_FAILURE);
   }
 }
 
-void ir_buffer_free(IrContext *context) { da_free(context->buffer); }
+// Statement handling
+
+static IrReg handle_var_declaration(IrContext *context, AstStmt *stmt) {
+  if (!stmt) {
+    return NULL_REG;
+  }
+
+  IrReg init_reg = handle_expression(context, stmt->stmt_var_decl.init);
+
+  IrInstr inst = {
+    .op = IR_INST_STORE_VAR,
+    .res = init_reg,
+    .var_name = stmt->stmt_var_decl.name,
+  };
+  da_append(context->buffer, inst);
+
+  return NULL_REG;
+}
+
+static IrReg handle_statement(IrContext *context, AstStmt *stmt) {
+  if (!stmt) {
+    return NULL_REG;
+  }
+
+  switch (stmt->type) {
+  case STMT_EXPRESSION:
+    return handle_expression(context, stmt->stmt_expr.expression);
+  case STMT_VAR_DECL:
+    return handle_var_declaration(context, stmt);
+
+  default:
+    fprintf(stderr, "gen_ir_statement: unhandled AST statement type %d\n", stmt->type);
+    exit(EXIT_FAILURE);
+  }
+}
+
+void ir_buffer_free(IrContext *context) {
+  da_free(context->buffer);
+}
 
 void ir_gen_init(IrContext *context, Arena *ast_arena) {
   context->buffer = NULL;
@@ -114,6 +155,6 @@ void ir_gen_init(IrContext *context, Arena *ast_arena) {
   context->next_reg = 1;
 }
 
-void emit_ir(IrContext *context, AstExpr *root) {
-  handle_expression(context, root);
+void emit_ir(IrContext *context, AstStmt *root) {
+  handle_statement(context, root);
 }

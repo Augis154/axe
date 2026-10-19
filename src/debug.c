@@ -8,12 +8,13 @@
 static const char *unop_strings[UNARYOP_COUNT];
 static const char *binop_strings[BINARYOP_COUNT];
 
-static void print_indent(int indent) { printf("%*s", indent * 2, ""); }
+static void print_indent(int indent) {
+  printf("%*s", indent * 2, "");
+}
 
 static void print_ast_node(Arena *arena, AstExpr *node, int indent);
 
-static void print_ast_field(const char *label, Arena *arena, AstExpr *node,
-                            int indent) {
+static void print_ast_field(const char *label, Arena *arena, AstExpr *node, int indent) {
   print_indent(indent);
   printf("%s\n", label);
   if (node) {
@@ -67,8 +68,7 @@ void debug_print_token(Token token) {
     break;
   case TOKEN_NUMBER:
   case TOKEN_IDENT:
-    printf("Token: %s %.*s\n", lexer_render_token_type(token.type),
-           (int)token.lexeme_len, token.lexeme);
+    printf("Token: %s %.*s\n", lexer_render_token_type(token.type), (int)token.lexeme_len, token.lexeme);
     break;
   default:
     printf("Token: %s\n", lexer_render_token_type(token.type));
@@ -112,6 +112,51 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
   }
 }
 
+void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
+  if (!stmt) {
+    printf("<null>\n");
+    return;
+  }
+
+  switch (stmt->type) {
+  case STMT_EXPRESSION:
+    printf("Expression Statement:\n");
+    print_indent(1);
+    debug_print_ast_sexpr(arena, stmt->stmt_expr.expression);
+    printf("\n");
+    break;
+
+  case STMT_VAR_DECL:
+    printf("Variable Declaration: %s\n", stmt->stmt_var_decl.name);
+    if (stmt->stmt_var_decl.type) {
+      print_indent(1);
+      printf("Type: %s\n", stmt->stmt_var_decl.type);
+    }
+    if (stmt->stmt_var_decl.init) {
+      print_indent(1);
+      printf("Init: ");
+      debug_print_ast_sexpr(arena, stmt->stmt_var_decl.init);
+      printf("\n");
+    }
+    break;
+
+  default:
+    printf("<unknown statement type>\n");
+  }
+}
+
+void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
+  if (!decl) {
+    printf("<null>\n");
+    return;
+  }
+
+  switch (decl->type) {
+  default:
+    printf("<unknown declaration type>\n");
+  }
+}
+
 void debug_print_ir_buffer(IrContext *ir_ctx) {
   for (size_t i = 0; i < da_len(ir_ctx->buffer); i++) {
     IrInstr *inst = &ir_ctx->buffer[i];
@@ -124,9 +169,12 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
     case IR_INST_LOAD_LITERAL:
       printf("%zu: r%u = %ld\n", i, inst->res.id, inst->literal);
       break;
+
     case IR_INST_LOAD_VAR:
-      printf("%zu: r%u = LOAD_VAR(var_id=%u)\n", i, inst->res.id,
-             inst->arg1.id);
+      printf("%zu: r%u = LOAD_VAR(var_name=%s)\n", i, inst->res.id, inst->var_name);
+      break;
+    case IR_INST_STORE_VAR:
+      printf("%zu: STORE_VAR(var_name=%s, r%u)\n", i, inst->var_name, inst->res.id);
       break;
 
       // Unary operations
@@ -136,20 +184,16 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
 
       // Binary operations
     case IR_INST_ADD:
-      printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id,
-             inst->arg2.id);
+      printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     case IR_INST_SUB:
-      printf("%zu: r%u = r%u - r%u\n", i, inst->res.id, inst->arg1.id,
-             inst->arg2.id);
+      printf("%zu: r%u = r%u - r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     case IR_INST_MUL:
-      printf("%zu: r%u = r%u * r%u\n", i, inst->res.id, inst->arg1.id,
-             inst->arg2.id);
+      printf("%zu: r%u = r%u * r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     case IR_INST_DIV:
-      printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id,
-             inst->arg2.id);
+      printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
 
     default:
@@ -160,12 +204,12 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
 }
 
 static const char *unop_strings[UNARYOP_COUNT] = {
-    [UNARYOP_NEGATE] = "-",
+  [UNARYOP_NEGATE] = "-",
 };
 
 static const char *binop_strings[BINARYOP_COUNT] = {
-    [BINARYOP_ADD] = "+",
-    [BINARYOP_SUB] = "-",
-    [BINARYOP_MUL] = "*",
-    [BINARYOP_DIV] = "/",
+  [BINARYOP_ADD] = "+",
+  [BINARYOP_SUB] = "-",
+  [BINARYOP_MUL] = "*",
+  [BINARYOP_DIV] = "/",
 };
