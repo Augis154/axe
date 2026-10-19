@@ -9,7 +9,9 @@ AlignOperands: "Align"
 ColumnLimit: 120
 NamespaceIndentation: Inner
 PointerAlignment: Right
-SortIncludes.Enabled: true
+SortIncludes:
+  Enabled: true
+  IgnoreCase: true
 AlignEscapedNewlines: LeftWithLastLine
 AlignArrayOfStructures: None
 BinPackArguments: false

@@ -50,8 +50,7 @@ void arena_free(Arena *a) {
 }
 
 ArenaMark arena_mark(Arena *a) {
-  return (ArenaMark){.block = a->current,
-                     .used = a->current ? a->current->used : 0};
+  return (ArenaMark){.block = a->current, .used = a->current ? a->current->used : 0};
 }
 
 void arena_rollback(Arena *a, ArenaMark mark) {
