@@ -10,7 +10,9 @@ typedef enum {
   IR_INST_NONE = 0,
 
   IR_INST_LOAD_LITERAL,
+
   IR_INST_LOAD_VAR,
+  IR_INST_STORE_VAR,
 
   IR_INST_NEGATE,
 
@@ -36,6 +38,7 @@ typedef struct {
       IrReg arg2;
     };
     int64_t literal;
+    char *var_name;
   };
 } IrInstr;
 
@@ -49,6 +52,6 @@ typedef struct {
 void ir_gen_init(IrContext *context, Arena *ast_arena);
 void ir_buffer_free(IrContext *context);
 
-void emit_ir(IrContext *context, AstExpr *root);
+void emit_ir(IrContext *context, AstStmt *root);
 
 #endif // IR_H

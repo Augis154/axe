@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *token_strings[TOKEN_COUNT];
@@ -81,7 +82,7 @@ static Token error_token(Lexer *lex, const char *message) {
   Token token;
   token.line = lex->line;
   token.type = TOKEN_ERROR;
-  token.lexeme = message;
+  token.lexeme = strdup(message);
   token.lexeme_len = strlen(message);
   return token;
 }
@@ -121,6 +122,11 @@ Token lexer_get_token(Lexer *lex) {
   char c = advance(lex);
 
   switch (c) {
+  case ':':
+    return new_token(lex, TOKEN_COLON);
+  case ';':
+    return new_token(lex, TOKEN_SEMICOLON);
+
   case '(':
     return new_token(lex, TOKEN_OPAREN);
   case ')':
@@ -135,6 +141,9 @@ Token lexer_get_token(Lexer *lex) {
   case '/':
     return new_token(lex, TOKEN_SLASH);
 
+  case '=':
+    return new_token(lex, TOKEN_EQUAL);
+
   default:
     if (is_digit(c)) {
       return number(lex);
@@ -147,7 +156,10 @@ Token lexer_get_token(Lexer *lex) {
     break;
   }
 
-  return error_token(lex, "Invalid token");
+  char error_msg[64];
+  snprintf(error_msg, sizeof(error_msg), "Unexpected character: '%c'", c);
+
+  return error_token(lex, error_msg);
 }
 
 const char *lexer_render_token_type(TokenType type) {
@@ -165,6 +177,13 @@ static const char *token_strings[TOKEN_COUNT] = {
   [TOKEN_MINUS] = "-",
   [TOKEN_STAR] = "*",
   [TOKEN_SLASH] = "/",
+  [TOKEN_EQUAL] = "=",
+
+  [TOKEN_COLON] = ":",
+  [TOKEN_SEMICOLON] = ";",
+
+  [TOKEN_OPAREN] = "(",
+  [TOKEN_CPAREN] = ")",
 
   [TOKEN_IDENT] = "Identifier",
   [TOKEN_NUMBER] = "Number",

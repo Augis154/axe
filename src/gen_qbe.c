@@ -22,30 +22,33 @@ void generate_qbe(const char *filename, IrContext *context) {
     case IR_INST_NONE:
       fprintf(file, "\n");
       break;
+
     case IR_INST_LOAD_LITERAL:
       fprintf(file, "  %%r%u =w copy %ld\n", inst->res.id, inst->literal);
       break;
+
     case IR_INST_LOAD_VAR:
-      fprintf(file, "  %%r%u =w $%u\n", inst->res.id, inst->arg1.id);
+      fprintf(file, "  %%r%u =w copy %%%s\n", inst->res.id, inst->var_name);
       break;
+    case IR_INST_STORE_VAR:
+      fprintf(file, "  %%%s =w copy %%r%u\n", inst->var_name, inst->res.id);
+      break;
+
     case IR_INST_NEGATE:
       fprintf(file, "  %%r%u =w neg %%r%u\n", inst->res.id, inst->arg1.id);
       break;
+
     case IR_INST_ADD:
-      fprintf(file, "  %%r%u =w add %%r%u, %%r%u\n", inst->res.id,
-              inst->arg1.id, inst->arg2.id);
+      fprintf(file, "  %%r%u =w add %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     case IR_INST_SUB:
-      fprintf(file, "  %%r%u =w sub %%r%u, %%r%u\n", inst->res.id,
-              inst->arg1.id, inst->arg2.id);
+      fprintf(file, "  %%r%u =w sub %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     case IR_INST_MUL:
-      fprintf(file, "  %%r%u =w mul %%r%u, %%r%u\n", inst->res.id,
-              inst->arg1.id, inst->arg2.id);
+      fprintf(file, "  %%r%u =w mul %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     case IR_INST_DIV:
-      fprintf(file, "  %%r%u =w div %%r%u, %%r%u\n", inst->res.id,
-              inst->arg1.id, inst->arg2.id);
+      fprintf(file, "  %%r%u =w div %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
     default:
       fprintf(file, "  %zu: Unknown instruction\n", i);

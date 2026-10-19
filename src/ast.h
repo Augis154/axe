@@ -7,6 +7,8 @@
 #include <stdint.h>
 
 typedef struct AstExpr_ AstExpr;
+typedef struct AstStmt_ AstStmt;
+typedef struct AstDecl_ AstDecl;
 
 typedef enum {
   UNARYOP_NEGATE,
@@ -23,6 +25,8 @@ typedef enum {
   BINARYOP_COUNT,
 } BinaryOp;
 
+// Expression nodes
+
 typedef enum {
   EXPR_INVALID,
 
@@ -31,7 +35,7 @@ typedef enum {
 
   EXPR_UNARY,
   EXPR_BINARY,
-} AstNodeType;
+} AstExprType;
 
 typedef struct {
   int64_t value;
@@ -40,8 +44,6 @@ typedef struct {
 typedef struct {
   char *name;
 } AstIdentifier;
-
-// Expression nodes
 
 typedef struct {
   UnaryOp op;
@@ -55,7 +57,8 @@ typedef struct {
 } AstExprBinary;
 
 struct AstExpr_ {
-  AstNodeType type;
+  AstExprType type;
+  uint32_t id;
 
   union {
     AstLiteral literal;
@@ -66,8 +69,59 @@ struct AstExpr_ {
   };
 };
 
+// Statement nodes
+
+typedef enum {
+  STMT_INVALID,
+
+  STMT_EXPRESSION,
+  STMT_VAR_DECL,
+} AstStmtType;
+
+typedef struct {
+  AstExpr *expression;
+} AstStmtExpr;
+
+typedef struct {
+  char *name;
+  char *type;
+  AstExpr *init;
+} AstStmtVarDecl;
+
+struct AstStmt_ {
+  AstStmtType type;
+  uint32_t id;
+
+  union {
+    AstStmtExpr stmt_expr;
+    AstStmtVarDecl stmt_var_decl;
+  };
+};
+
+// Declaration nodes
+
+typedef enum {
+  DECL_INVALID,
+} AstDeclType;
+
+typedef struct {
+  char *name;
+  AstExpr *init;
+} AstDeclVar;
+
+struct AstDecl_ {
+  AstDeclType type;
+  uint32_t id;
+
+  union {
+    AstDeclVar decl_var;
+  };
+};
+
 void ast_arena_free(Arena *arena);
 
-AstExpr *ast_expr_new(Arena *arena, AstNodeType type);
+AstExpr *ast_expr_new(Arena *arena, AstExprType type);
+AstStmt *ast_stmt_new(Arena *arena, AstStmtType type);
+AstDecl *ast_decl_new(Arena *arena, AstDeclType type);
 
 #endif // AST_H

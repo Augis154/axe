@@ -14,9 +14,13 @@ typedef enum {
   TOKEN_MINUS, // -
   TOKEN_STAR,  // *
   TOKEN_SLASH, // /
+  TOKEN_EQUAL, // =
 
   TOKEN_OPAREN, // (
   TOKEN_CPAREN, // )
+
+  TOKEN_COLON,     // :
+  TOKEN_SEMICOLON, // ;
 
   // Literals
   TOKEN_IDENT,
@@ -67,5 +71,7 @@ Token lexer_get_token(Lexer *lex);
 const char *lexer_render_token_type(TokenType type);
 
 AstExpr *parse_expression(Parser *parser);
+AstStmt *parse_statement(Parser *parser);
+AstDecl *parse_declaration(Parser *parser);
 
 #endif // FRONTEND_H
