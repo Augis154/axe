@@ -250,11 +250,9 @@ AstExpr *parse_expression(Parser *parser) {
 }
 
 AstStmt *parse_statement(Parser *parser) {
-  return parse_variable_declaration(parser);
-
-  switch (parser->current.type) {
-  case TOKEN_SEMICOLON:
-    return parse_expression_statement(parser);
+  switch (parser->next.type) {
+  case TOKEN_IDENT:
+    return parse_variable_declaration(parser);
   default:
     return parse_expression_statement(parser);
   }

@@ -55,6 +55,19 @@ static IrReg handle_literal(IrContext *context, AstExpr *node) {
   return res;
 }
 
+static IrReg handle_identifier(IrContext *context, AstExpr *node) {
+  IrReg res = next_reg(context);
+
+  IrInstr inst = {
+    .op = IR_INST_LOAD_VAR,
+    .res = res,
+    .var_name = node->identifier.name,
+  };
+  da_append(context->buffer, inst);
+
+  return res;
+}
+
 static IrReg handle_unary_op(IrContext *context, AstExpr *node) {
   IrReg operand = handle_expression(context, node->expr_unary.operand);
 
@@ -95,6 +108,9 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
   switch (node->type) {
   case EXPR_LITERAL:
     return handle_literal(context, node);
+
+  case EXPR_IDENTIFIER:
+    return handle_identifier(context, node);
 
   case EXPR_UNARY:
     return handle_unary_op(context, node);

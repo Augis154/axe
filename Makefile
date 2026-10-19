@@ -29,3 +29,6 @@ compile: all
 	./axc expr.ax
 	qbe out.ssa -o out.s
 	gcc out.s -o out
+
+format:
+	clang-format -i src/**/*.c src/**/*.h
