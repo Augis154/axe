@@ -192,6 +192,7 @@ static AstStmt *parse_expression_statement(Parser *parser) {
 }
 
 static AstStmt *parse_variable_declaration(Parser *parser) {
+  advance(parser);
   expect(TOKEN_IDENT, "Expected variable name after 'var'.");
 
   Token name_token = parser->current;
@@ -250,7 +251,7 @@ AstExpr *parse_expression(Parser *parser) {
 
 AstStmt *parse_statement(Parser *parser) {
   switch (parser->next.type) {
-  case TOKEN_IDENT:
+  case TOKEN_VAR:
     return parse_variable_declaration(parser);
   default:
     return parse_expression_statement(parser);

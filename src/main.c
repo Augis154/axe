@@ -15,13 +15,27 @@
 int main(int argc, char **argv) {
   // char *source = "1+2;";
   // char *source = "(1+2)*3--4;";
-  char *source = "x: int = 1+2; 4 + x;";
+  char *source = "var x: int = 1+2; x + 4;";
 
   CompilationUnit comp_unit = {0};
 
   st_init(&comp_unit.symbol_table, 1024);
   comp_unit.source = source;
   comp_unit.source_len = strlen(source);
+
+  // Lexer lexer;
+  // lexer_init(&lexer, &comp_unit);
+
+  // while (1) {
+  //   Token token = lexer_get_token(&lexer);
+  //   debug_print_token(token);
+
+  //   if (token.type == TOKEN_EOF) {
+  //     break;
+  //   }
+  // }
+
+  // return 0;
 
   Parser parser;
   parser_init(&parser, &comp_unit);
@@ -67,15 +81,5 @@ int main(int argc, char **argv) {
   generate_qbe("out.ssa", &ir_context);
 
   ir_buffer_free(&ir_context);
-
-  // while (1) {
-  //   Token token = lexer_get_token(&lexer);
-  //   debug_print_token(token);
-
-  //   if (token.type == TOKEN_EOF) {
-  //     break;
-  //   }
-  // }
-
   ast_arena_free(&comp_unit.ast_arena);
 }
