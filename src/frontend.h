@@ -2,6 +2,7 @@
 #define FRONTEND_H
 
 #include "ast.h"
+#include "compiler.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -53,18 +54,17 @@ typedef struct {
 } Lexer;
 
 typedef struct {
-  Lexer *lexer;
-  Arena *ast_arena;
+  CompilationUnit *comp_unit;
+  Lexer lexer;
 
   Token current;
   Token next;
 
-  bool had_error;
   bool panic_mode;
 } Parser;
 
-void lexer_init(Lexer *lex, const char *source, size_t length);
-void parser_init(Parser *parser, Lexer *lexer, Arena *arena);
+void lexer_init(Lexer *lex, CompilationUnit *comp_unit);
+void parser_init(Parser *parser, CompilationUnit *comp_unit);
 
 Token lexer_get_token(Lexer *lex);
 

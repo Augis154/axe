@@ -101,12 +101,12 @@ static Token identifier(Lexer *lex) {
   return new_token(lex, TOKEN_IDENT);
 }
 
-void lexer_init(Lexer *lex, const char *source, size_t length) {
-  lex->source_start = source;
-  lex->source_end = source + length;
+void lexer_init(Lexer *lex, CompilationUnit *comp_unit) {
+  lex->source_start = comp_unit->source;
+  lex->source_end = comp_unit->source + comp_unit->source_len;
 
-  lex->token_start = source;
-  lex->current = source;
+  lex->token_start = comp_unit->source;
+  lex->current = comp_unit->source;
   lex->line = 1;
 }
 

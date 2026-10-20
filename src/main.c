@@ -1,8 +1,11 @@
 #include "ast.h"
 #include "backend.h"
+#include "compiler.h"
 #include "debug.h"
 #include "frontend.h"
 #include "ir.h"
+
+#include "lib/arena.h"
 #include "lib/array.h"
 #include "lib/str_table.h"
 
@@ -14,16 +17,14 @@ int main(int argc, char **argv) {
   // char *source = "(1+2)*3--4;";
   char *source = "x: int = 1+2; 4 + x;";
 
-  StrTable symbol_table;
-  st_init(&symbol_table, 1024);
+  CompilationUnit comp_unit = {0};
 
-  Lexer lexer;
-  lexer_init(&lexer, source, strlen(source));
-
-  Arena ast_arena = {0};
+  st_init(&comp_unit.symbol_table, 1024);
+  comp_unit.source = source;
+  comp_unit.source_len = strlen(source);
 
   Parser parser;
-  parser_init(&parser, &lexer, &ast_arena);
+  parser_init(&parser, &comp_unit);
 
   AstStmt *statements = NULL;
 
@@ -45,15 +46,15 @@ int main(int argc, char **argv) {
   // debug_print_ast_stmt(&ast_arena, root);
   // printf("\n");
 
-  printf("Parser had error: %s\n", parser.had_error ? "true" : "false");
+  printf("Had error: %s\n", comp_unit.had_error ? "true" : "false");
 
-  if (parser.had_error) {
-    ast_arena_free(&ast_arena);
+  if (comp_unit.had_error) {
+    ast_arena_free(&comp_unit.ast_arena);
     return 1;
   }
 
   IrContext ir_context;
-  ir_gen_init(&ir_context, &ast_arena);
+  ir_gen_init(&ir_context, &comp_unit);
 
   for (size_t i = 0; i < da_len(statements); i++) {
     AstStmt *stmt = &statements[i];
@@ -76,5 +77,5 @@ int main(int argc, char **argv) {
   //   }
   // }
 
-  ast_arena_free(&ast_arena);
+  ast_arena_free(&comp_unit.ast_arena);
 }
