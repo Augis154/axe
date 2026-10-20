@@ -67,14 +67,14 @@ static void error_at(Parser *parser, Token token, const char *message) {
 
   fprintf(stderr, ": %s\n", message);
 
-  parser->had_error = true;
+  parser->comp_unit->had_error = true;
 }
 
 static void advance(Parser *parser) {
   parser->current = parser->next;
 
   for (;;) {
-    parser->next = lexer_get_token(parser->lexer);
+    parser->next = lexer_get_token(&parser->lexer);
 
     if (parser->next.type != TOKEN_ERROR) {
       break;
@@ -129,14 +129,14 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
 }
 
 static AstExpr *parse_number(Parser *parser) {
-  AstExpr *expr = ast_expr_new(parser->ast_arena, EXPR_LITERAL);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_LITERAL);
 
   expr->literal.value = strtoll(parser->current.lexeme, NULL, 10);
   return expr;
 }
 
 static AstExpr *parse_identifier(Parser *parser) {
-  AstExpr *expr = ast_expr_new(parser->ast_arena, EXPR_IDENTIFIER);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_IDENTIFIER);
 
   size_t length = parser->current.lexeme_len;
   expr->identifier.name = strndup(parser->current.lexeme, length);
@@ -157,7 +157,7 @@ static AstExpr *parse_unary(Parser *parser) {
 
   AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
 
-  AstExpr *unary_expr = ast_expr_new(parser->ast_arena, EXPR_UNARY);
+  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_UNARY);
   unary_expr->expr_unary.op = get_unary_op(operator);
   unary_expr->expr_unary.operand = op_expr;
 
@@ -170,7 +170,7 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 
   AstExpr *right = parse_precedence(parser, rule->precedence + 1);
 
-  AstExpr *binary_expr = ast_expr_new(parser->ast_arena, EXPR_BINARY);
+  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_BINARY);
   binary_expr->expr_binary.op = get_binary_op(operator);
   binary_expr->expr_binary.left = left;
   binary_expr->expr_binary.right = right;
@@ -185,7 +185,7 @@ static AstStmt *parse_expression_statement(Parser *parser) {
 
   expect(TOKEN_SEMICOLON, "Expected ';' after expression");
 
-  AstStmt *stmt = ast_stmt_new(parser->ast_arena, STMT_EXPRESSION);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_EXPRESSION);
   stmt->stmt_expr.expression = expr;
 
   return stmt;
@@ -223,7 +223,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
     return NULL;
   }
 
-  AstStmt *stmt = ast_stmt_new(parser->ast_arena, STMT_VAR_DECL);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_VAR_DECL);
   stmt->stmt_var_decl.name = strndup(name_token.lexeme, name_token.lexeme_len);
   stmt->stmt_var_decl.type = type_name;
   stmt->stmt_var_decl.init = init_expr;
@@ -235,11 +235,10 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
 // Parser public functions
 
-void parser_init(Parser *parser, Lexer *lexer, Arena *arena) {
-  parser->lexer = lexer;
-  parser->ast_arena = arena;
+void parser_init(Parser *parser, CompilationUnit *comp_unit) {
+  parser->comp_unit = comp_unit;
+  lexer_init(&parser->lexer, comp_unit);
 
-  parser->had_error = false;
   parser->panic_mode = false;
 
   advance(parser);

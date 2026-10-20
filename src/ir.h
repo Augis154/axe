@@ -2,6 +2,7 @@
 #define IR_H
 
 #include "ast.h"
+#include "compiler.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -43,13 +44,14 @@ typedef struct {
 } IrInstr;
 
 typedef struct {
+  CompilationUnit *comp_unit;
+
   IrInstr *buffer;
-  Arena *ast_arena;
 
   uint32_t next_reg;
 } IrContext;
 
-void ir_gen_init(IrContext *context, Arena *ast_arena);
+void ir_gen_init(IrContext *context, CompilationUnit *comp_unit);
 void ir_buffer_free(IrContext *context);
 
 void emit_ir(IrContext *context, AstStmt *root);

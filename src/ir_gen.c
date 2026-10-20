@@ -164,9 +164,9 @@ void ir_buffer_free(IrContext *context) {
   da_free(context->buffer);
 }
 
-void ir_gen_init(IrContext *context, Arena *ast_arena) {
+void ir_gen_init(IrContext *context, CompilationUnit *comp_unit) {
   context->buffer = NULL;
-  context->ast_arena = ast_arena;
+  context->comp_unit = comp_unit;
 
   context->next_reg = 1;
 }
