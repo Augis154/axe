@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#define KEYWORDS(X) X("var", TOKEN_VAR)
+
 typedef enum {
   TOKEN_ERROR = 0,
   TOKEN_EOF,
@@ -31,6 +33,11 @@ typedef enum {
   TOKEN_CHAR,
   TOKEN_STRING,
 
+// Keywords
+#define KEYWORD_TOKEN(name, token) token
+  KEYWORDS(KEYWORD_TOKEN),
+#undef KEYWORD_TOKEN
+
   TOKEN_COUNT,
 } TokenType;
 
@@ -42,6 +49,12 @@ typedef struct {
   const char *lexeme;
   size_t lexeme_len;
 } Token;
+
+typedef struct {
+  const char *name;
+  size_t name_len;
+  TokenType type;
+} Keyword;
 
 typedef struct {
   const char *source_start;

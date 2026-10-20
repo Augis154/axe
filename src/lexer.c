@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const Keyword keywords[];
+static const size_t KEYWORD_COUNT;
+
 static const char *token_strings[TOKEN_COUNT];
 
 static inline bool reached_end(Lexer *l) {
@@ -98,6 +101,17 @@ static Token identifier(Lexer *lex) {
   while (is_alnum(peek(lex))) {
     advance(lex);
   }
+
+  char *token_start = (char *)lex->token_start;
+  size_t token_length = (size_t)(lex->current - lex->token_start);
+
+  for (size_t i = 0; i < KEYWORD_COUNT; i++) {
+    const Keyword keyword = keywords[i];
+    if (token_length == keyword.name_len && strncmp(token_start, keyword.name, token_length) == 0) {
+      return new_token(lex, keyword.type);
+    }
+  }
+
   return new_token(lex, TOKEN_IDENT);
 }
 
@@ -169,6 +183,14 @@ const char *lexer_render_token_type(TokenType type) {
   return token_strings[type];
 }
 
+static const Keyword keywords[] = {
+#define KEYWORD_TOKEN(name, token) {name, strlen(name), token},
+  KEYWORDS(KEYWORD_TOKEN)
+#undef KEYWORD_TOKEN
+};
+
+static const size_t KEYWORD_COUNT = sizeof(keywords) / sizeof(keywords[0]);
+
 static const char *token_strings[TOKEN_COUNT] = {
   [TOKEN_ERROR] = "Error",
   [TOKEN_EOF] = "EOF",
@@ -189,4 +211,8 @@ static const char *token_strings[TOKEN_COUNT] = {
   [TOKEN_NUMBER] = "Number",
   [TOKEN_CHAR] = "Character",
   [TOKEN_STRING] = "String",
+
+#define KEYWORD_TOKEN(name, token) [token] = name
+  KEYWORDS(KEYWORD_TOKEN),
+#undef KEYWORD_TOKEN
 };
