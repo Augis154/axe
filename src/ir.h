@@ -39,7 +39,7 @@ typedef struct {
       IrReg arg2;
     };
     int64_t literal;
-    char *var_name;
+    const char *var_name;
   };
 } IrInstr;
 

@@ -20,6 +20,8 @@ int main(int argc, char **argv) {
   CompilationUnit comp_unit = {0};
 
   st_init(&comp_unit.symbol_table, 1024);
+  st_init(&comp_unit.intern_table, 1024);
+
   comp_unit.source = source;
   comp_unit.source_len = strlen(source);
 

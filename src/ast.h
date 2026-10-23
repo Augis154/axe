@@ -42,7 +42,7 @@ typedef struct {
 } AstLiteral;
 
 typedef struct {
-  char *name;
+  const char *name;
 } AstIdentifier;
 
 typedef struct {
@@ -83,8 +83,8 @@ typedef struct {
 } AstStmtExpr;
 
 typedef struct {
-  char *name;
-  char *type;
+  const char *name;
+  const char *type;
   AstExpr *init;
 } AstStmtVarDecl;
 
