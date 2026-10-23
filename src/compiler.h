@@ -14,6 +14,7 @@ typedef struct {
   size_t source_len;
 
   Arena ast_arena;
+  StrTable intern_table;
   StrTable symbol_table;
 
   bool had_error;

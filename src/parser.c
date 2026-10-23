@@ -1,9 +1,9 @@
 #include "ast.h"
 #include "frontend.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 typedef enum {
   PREC_NONE = 0,
@@ -99,6 +99,15 @@ static bool match(Parser *parser, TokenType type) {
     return NULL;                             \
   }
 
+static const char *parse_identifier_name(Parser *parser, Token token) {
+  if (token.type != TOKEN_IDENT) {
+    error_at(parser, token, "Expected identifier.");
+    return NULL;
+  }
+
+  return st_intern_len(&parser->comp_unit->intern_table, token.lexeme, token.lexeme_len);
+}
+
 // Expression parsing functions
 
 static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
@@ -130,16 +139,20 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
 
 static AstExpr *parse_number(Parser *parser) {
   AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_LITERAL);
-
   expr->literal.value = strtoll(parser->current.lexeme, NULL, 10);
+
   return expr;
 }
 
 static AstExpr *parse_identifier(Parser *parser) {
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_IDENTIFIER);
+  const char *identifier_name = parse_identifier_name(parser, parser->current);
+  if (!identifier_name) {
+    return NULL;
+  }
 
-  size_t length = parser->current.lexeme_len;
-  expr->identifier.name = strndup(parser->current.lexeme, length);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_IDENTIFIER);
+  expr->identifier.name = identifier_name;
+
   return expr;
 }
 
@@ -197,10 +210,12 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
   Token name_token = parser->current;
 
-  char *type_name = NULL;
+  const char *type_name = NULL;
   if (match(parser, TOKEN_COLON)) {
     expect(TOKEN_IDENT, "Expected type name after ':'.");
-    type_name = strndup(parser->current.lexeme, parser->current.lexeme_len);
+
+    // TODO: Properly parse type names
+    const char *type_name = parse_identifier_name(parser, parser->current);
   }
 
   AstExpr *init_expr = NULL;
@@ -210,22 +225,18 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
   expect(TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
 
-  // 4. Register in Symbol Table (if using single-pass resolution)
-  // if (p->sym_table != NULL) {
-  //   if (scope_contains_current(p->sym_table->current, name_token.lexeme)) {
-  //     error_at_previous(p, "Variable already declared in this scope.");
-  //   } else {
-  //     symbol_table_define(p->sym_table, name_token.lexeme, SYM_VARIABLE);
-  //   }
-  // }
-
   if (!type_name && !init_expr) {
     error_at(parser, name_token, "Variable declaration must have either a type annotation or an initializer.");
     return NULL;
   }
 
+  const char *var_name = parse_identifier_name(parser, name_token);
+  if (!var_name) {
+    return NULL;
+  }
+
   AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_VAR_DECL);
-  stmt->stmt_var_decl.name = strndup(name_token.lexeme, name_token.lexeme_len);
+  stmt->stmt_var_decl.name = var_name;
   stmt->stmt_var_decl.type = type_name;
   stmt->stmt_var_decl.init = init_expr;
 

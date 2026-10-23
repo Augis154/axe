@@ -4,6 +4,7 @@
 #include <stdalign.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #define ARENA_BLOCK_SIZE 65536 // 64KB chunks
 
@@ -31,7 +32,9 @@ void arena_free(Arena *a);
 ArenaMark arena_mark(Arena *a);
 void arena_rollback(Arena *a, ArenaMark mark);
 
-char *arena_strdup(Arena *a, const char *str);
 char *arena_strndup(Arena *a, const char *str, size_t len);
+inline char *arena_strdup(Arena *a, const char *str) {
+  return arena_strndup(a, str, strlen(str));
+}
 
 #endif // ARENA_H
