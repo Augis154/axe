@@ -137,9 +137,45 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
   return left;
 }
 
-static AstExpr *parse_number(Parser *parser) {
+static AstExpr *parse_int_literal(Parser *parser) {
+  uint8_t base = 10;
+  uint64_t value = 0;
+
+  for (size_t i = 0; i < parser->current.lexeme_len; i++) {
+    char c = parser->current.lexeme[i];
+    if (c == '_') {
+      continue;
+    }
+
+    int8_t digit = -1;
+
+    if (c >= '0' && c <= '9') {
+      digit = c - '0';
+    } else if (c >= 'a' && c <= 'f') {
+      digit = c - 'a' + 10;
+    } else if (c >= 'A' && c <= 'F') {
+      digit = c - 'A' + 10;
+    }
+
+    if (digit < 0 || digit >= base) {
+      error_at(parser, parser->current, "Invalid character in integer literal.");
+      return NULL;
+    }
+
+    value = value * base + digit;
+  }
+
   AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_LITERAL);
-  expr->literal.value = strtoll(parser->current.lexeme, NULL, 10);
+  expr->literal.type = LITERAL_INT;
+  expr->literal.int_value = value;
+
+  return expr;
+}
+
+static AstExpr *parse_float_literal(Parser *parser) {
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_LITERAL);
+  expr->literal.type = LITERAL_FLOAT;
+  expr->literal.float_value = strtod(parser->current.lexeme, NULL);
 
   return expr;
 }
@@ -277,7 +313,9 @@ AstDecl *parse_declaration(Parser *parser) {
 // Parse rules and operator mappings
 
 static const ParseRule rules[TOKEN_COUNT] = {
-  [TOKEN_NUMBER] = {PREC_NONE, parse_number, NULL},
+  [TOKEN_INT] = {PREC_NONE, parse_int_literal, NULL},
+  [TOKEN_FLOAT] = {PREC_NONE, parse_float_literal, NULL},
+
   [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
 
   [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},

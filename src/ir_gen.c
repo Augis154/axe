@@ -43,12 +43,28 @@ static IrOp get_binary_ir_op(BinaryOp op) {
 }
 
 static IrReg handle_literal(IrContext *context, AstExpr *node) {
+  AstLiteral *literal = &node->literal;
+
+  switch (literal->type) {
+  case LITERAL_INT:
+    break;
+  case LITERAL_FLOAT:
+    fprintf(stderr, "handle_literal: float literals not yet supported in IR generation\n");
+    exit(EXIT_FAILURE);
+  case LITERAL_CHAR:
+    fprintf(stderr, "handle_literal: char literals not yet supported in IR generation\n");
+    exit(EXIT_FAILURE);
+  case LITERAL_STRING:
+    fprintf(stderr, "handle_literal: string literals not yet supported in IR generation\n");
+    exit(EXIT_FAILURE);
+  }
+
   IrReg res = next_reg(context);
 
   IrInstr inst = {
     .op = IR_INST_LOAD_LITERAL,
     .res = res,
-    .literal = node->literal.value,
+    .literal = node->literal.int_value,
   };
   da_append(context->buffer, inst);
 

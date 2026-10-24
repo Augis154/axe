@@ -37,8 +37,21 @@ typedef enum {
   EXPR_BINARY,
 } AstExprType;
 
+typedef enum {
+  LITERAL_INT,
+  LITERAL_FLOAT,
+  LITERAL_CHAR,
+  LITERAL_STRING,
+} AstLiteralType;
+
 typedef struct {
-  int64_t value;
+  AstLiteralType type;
+  union {
+    int64_t int_value;
+    double float_value;
+    char char_value;
+    const char *string_value;
+  };
 } AstLiteral;
 
 typedef struct {

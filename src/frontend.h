@@ -29,7 +29,8 @@ typedef enum {
   TOKEN_IDENT,
 
   // Types
-  TOKEN_NUMBER,
+  TOKEN_INT,
+  TOKEN_FLOAT,
   TOKEN_CHAR,
   TOKEN_STRING,
 

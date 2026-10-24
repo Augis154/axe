@@ -21,6 +21,13 @@ static inline char peek(Lexer *l) {
   return *l->current;
 }
 
+static inline char peek_next(Lexer *l) {
+  if (l->current + 1 >= l->source_end) {
+    return '\0';
+  }
+  return *(l->current + 1);
+}
+
 static inline char advance(Lexer *l) {
   char c = *l->current++;
   if (c == '\n') {
@@ -91,10 +98,30 @@ static Token error_token(Lexer *lex, const char *message) {
 }
 
 static Token number(Lexer *lex) {
-  while (is_digit(peek(lex))) {
+  bool is_float = false;
+
+  // TODO: Handle hex and binary literals
+
+  while (is_digit(peek(lex)) || peek(lex) == '_') {
     advance(lex);
   }
-  return new_token(lex, TOKEN_NUMBER);
+
+  // Check for fractional part
+  if (peek(lex) == '.' && is_digit(peek_next(lex))) {
+    is_float = true;
+    advance(lex);
+    while (is_digit(peek(lex)) || peek(lex) == '_') {
+      advance(lex);
+    }
+  }
+
+  // Check for float suffix
+  if (peek(lex) == 'f' || peek(lex) == 'F') {
+    is_float = true;
+    advance(lex);
+  }
+
+  return new_token(lex, is_float ? TOKEN_FLOAT : TOKEN_INT);
 }
 
 static Token identifier(Lexer *lex) {
@@ -208,7 +235,9 @@ static const char *token_strings[TOKEN_COUNT] = {
   [TOKEN_CPAREN] = ")",
 
   [TOKEN_IDENT] = "Identifier",
-  [TOKEN_NUMBER] = "Number",
+
+  [TOKEN_INT] = "Integer",
+  [TOKEN_FLOAT] = "Float",
   [TOKEN_CHAR] = "Character",
   [TOKEN_STRING] = "String",
 

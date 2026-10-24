@@ -39,7 +39,16 @@ static void print_ast_node(Arena *arena, AstExpr *node, int indent) {
     printf("Invalid\n");
     break;
   case EXPR_LITERAL:
-    printf("Literal: %ld\n", node->literal.value);
+    switch (node->literal.type) {
+    case LITERAL_INT:
+      printf("Literal: %ld\n", node->literal.int_value);
+      break;
+    case LITERAL_FLOAT:
+      printf("Literal: %f\n", node->literal.float_value);
+      break;
+    default:
+      printf("Literal: <unknown type>\n");
+    }
     break;
   case EXPR_IDENTIFIER:
     printf("Identifier: %s\n", node->identifier.name);
@@ -66,7 +75,8 @@ void debug_print_token(Token token) {
   case TOKEN_ERROR:
     printf("Error: %.*s\n", (int)token.lexeme_len, token.lexeme);
     break;
-  case TOKEN_NUMBER:
+  case TOKEN_INT:
+  case TOKEN_FLOAT:
   case TOKEN_IDENT:
     printf("Token: %s %.*s\n", lexer_render_token_type(token.type), (int)token.lexeme_len, token.lexeme);
     break;
@@ -87,7 +97,16 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
 
   switch (node->type) {
   case EXPR_LITERAL:
-    printf("%ld", node->literal.value);
+    switch (node->literal.type) {
+    case LITERAL_INT:
+      printf("%ld", node->literal.int_value);
+      break;
+    case LITERAL_FLOAT:
+      printf("%f", node->literal.float_value);
+      break;
+    default:
+      printf("<unknown literal type>");
+    }
     break;
   case EXPR_IDENTIFIER:
     printf("%s", node->identifier.name);
