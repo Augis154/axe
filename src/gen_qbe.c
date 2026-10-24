@@ -10,7 +10,7 @@ void generate_qbe(const char *filename, IrContext *context) {
     return;
   }
 
-  fprintf(file, "# QBE IR generated from AST\n");
+  fprintf(file, "# Generated QBE IR\n");
 
   fprintf(file, "export function w $main() {\n");
   fprintf(file, "@start\n");

@@ -28,6 +28,7 @@ static IrOp get_unary_ir_op(UnaryOp op) {
 
 static IrOp get_binary_ir_op(BinaryOp op) {
   switch (op) {
+
   case BINARYOP_ADD:
     return IR_INST_ADD;
   case BINARYOP_SUB:
@@ -36,6 +37,7 @@ static IrOp get_binary_ir_op(BinaryOp op) {
     return IR_INST_MUL;
   case BINARYOP_DIV:
     return IR_INST_DIV;
+
   default:
     fprintf(stderr, "get_binary_ir_op: unhandled BinaryOp %d\n", op);
     exit(EXIT_FAILURE);
@@ -84,6 +86,19 @@ static IrReg handle_identifier(IrContext *context, AstExpr *node) {
   return res;
 }
 
+static IrReg handle_assignment(IrContext *context, AstExpr *node) {
+  IrReg value = handle_expression(context, node->assignment.value);
+
+  IrInstr inst = {
+    .op = IR_INST_STORE_VAR,
+    .res = value,
+    .var_name = node->assignment.target->identifier.name,
+  };
+  da_append(context->buffer, inst);
+
+  return value;
+}
+
 static IrReg handle_unary_op(IrContext *context, AstExpr *node) {
   IrReg operand = handle_expression(context, node->expr_unary.operand);
 
@@ -127,6 +142,9 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
 
   case EXPR_IDENTIFIER:
     return handle_identifier(context, node);
+
+  case EXPR_ASSIGN:
+    return handle_assignment(context, node);
 
   case EXPR_UNARY:
     return handle_unary_op(context, node);
