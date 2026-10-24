@@ -1,36 +1,33 @@
 #ifndef AST_H
 #define AST_H
 
+#include "common.h"
 #include "lib/arena.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct AstExpr_ AstExpr;
-typedef struct AstStmt_ AstStmt;
-typedef struct AstDecl_ AstDecl;
-typedef struct AstType_ AstType;
-
 typedef enum {
-  UNARYOP_NEGATE,
+  UNOP_NEGATE,
+  UNOP_NOT,
 
-  UNARYOP_COUNT,
+  UNOP_COUNT,
 } UnaryOp;
 
 typedef enum {
-  BINARYOP_ADD,
-  BINARYOP_SUB,
-  BINARYOP_MUL,
-  BINARYOP_DIV,
+  BINOP_ADD,
+  BINOP_SUB,
+  BINOP_MUL,
+  BINOP_DIV,
 
-  BINARYOP_LESS,
-  BINARYOP_GREATER,
-  BINARYOP_EQEQ,
-  BINARYOP_NOT_EQ,
-  BINARYOP_LESS_EQ,
-  BINARYOP_GREATER_EQ,
+  BINOP_LESS,
+  BINOP_GREATER,
+  BINOP_EQEQ,
+  BINOP_NOT_EQ,
+  BINOP_LESS_EQ,
+  BINOP_GREATER_EQ,
 
-  BINARYOP_COUNT,
+  BINOP_COUNT,
 } BinaryOp;
 
 // Expression nodes
@@ -66,6 +63,7 @@ typedef struct {
 
 typedef struct {
   const char *name;
+  Symbol *symbol;
 } AstIdentifier;
 
 typedef struct {
@@ -123,7 +121,7 @@ typedef struct {
 
 typedef struct {
   const char *name;
-  AstType *type_spec;
+  AstType *type;
   AstExpr *init;
 } AstStmtVarDecl;
 
@@ -199,5 +197,10 @@ AstExpr *ast_expr_new(Arena *arena, AstExprKind type);
 AstStmt *ast_stmt_new(Arena *arena, AstStmtKind type);
 AstDecl *ast_decl_new(Arena *arena, AstDeclKind type);
 AstType *ast_type_new(Arena *arena, AstTypeKind kind);
+
+uint32_t ast_expr_count();
+uint32_t ast_stmt_count();
+uint32_t ast_decl_count();
+uint32_t ast_type_count();
 
 #endif // AST_H

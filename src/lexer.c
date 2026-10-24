@@ -8,8 +8,6 @@
 static const Keyword keywords[];
 static const size_t KEYWORD_COUNT;
 
-static const char *token_strings[TOKEN_COUNT];
-
 static inline bool reached_end(Lexer *l) {
   return l->current >= l->source_end;
 }
@@ -83,9 +81,9 @@ static void begin_token(Lexer *lex) {
   lex->token_start = lex->current;
 }
 
-static Token new_token(Lexer *lex, TokenType type) {
+static Token new_token(Lexer *lex, TokenKind kind) {
   Token token;
-  token.type = type;
+  token.kind = kind;
   token.line = lex->line;
   token.lexeme = lex->token_start;
   token.lexeme_len = (size_t)(lex->current - lex->token_start);
@@ -95,7 +93,7 @@ static Token new_token(Lexer *lex, TokenType type) {
 static Token error_token(Lexer *lex, const char *message) {
   Token token;
   token.line = lex->line;
-  token.type = TOKEN_ERROR;
+  token.kind = TOKEN_ERROR;
   token.lexeme = strdup(message);
   token.lexeme_len = strlen(message);
   return token;
@@ -161,7 +159,7 @@ static Token identifier(Lexer *lex) {
   for (size_t i = 0; i < KEYWORD_COUNT; i++) {
     const Keyword keyword = keywords[i];
     if (token_length == keyword.name_len && strncmp(token_start, keyword.name, token_length) == 0) {
-      return new_token(lex, keyword.type);
+      return new_token(lex, keyword.kind);
     }
   }
 
@@ -255,13 +253,6 @@ Token lexer_get_token(Lexer *lex) {
   return error_token(lex, error_msg);
 }
 
-const char *lexer_render_token_type(TokenType type) {
-  if (type < 0 || type >= TOKEN_COUNT) {
-    return "Unknown";
-  }
-  return token_strings[type];
-}
-
 static const Keyword keywords[] = {
 #define KEYWORD_DEF(token, name) {name, strlen(name), token},
   TOKENS_KEYWORDS(KEYWORD_DEF)
@@ -269,9 +260,3 @@ static const Keyword keywords[] = {
 };
 
 static const size_t KEYWORD_COUNT = sizeof(keywords) / sizeof(keywords[0]);
-
-static const char *token_strings[TOKEN_COUNT] = {
-#define TOKEN_NAME(token, name) [token] = name,
-  TOKEN_LIST(TOKEN_NAME)
-#undef TOKEN_NAME
-};

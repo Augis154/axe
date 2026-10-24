@@ -50,3 +50,16 @@ AstType *ast_type_new(Arena *arena, AstTypeKind kind) {
 
   return type;
 }
+
+uint32_t ast_expr_count() {
+  return expr_id - 1;
+}
+uint32_t ast_stmt_count() {
+  return stmt_id - 1;
+}
+uint32_t ast_decl_count() {
+  return decl_id - 1;
+}
+uint32_t ast_type_count() {
+  return type_id - 1;
+}

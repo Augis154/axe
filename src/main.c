@@ -8,6 +8,7 @@
 #include "lib/arena.h"
 #include "lib/array.h"
 #include "lib/str_table.h"
+#include "sema.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -46,10 +47,18 @@ int main(int argc, char **argv) {
 
     // debug_print_ast_stmt(&comp_unit.ast_arena, stmt);
 
-    if (parser.next.type == TOKEN_EOF) {
+    if (parser.next.kind == TOKEN_EOF) {
       break;
     }
   }
+
+  SemaContext ctx;
+  sema_init(&ctx, &comp_unit);
+
+  for (size_t i = 0; i < da_len(statements); i++) {
+    sema_stmt(&ctx, &statements[i]);
+  }
+
   // AstStmt *root = parse_statement(&parser);
 
   // debug_print_ast_tree(&ast_arena, root);
@@ -75,7 +84,7 @@ int main(int argc, char **argv) {
 
   // emit_ir(&ir_context, root);
 
-  debug_print_ir_buffer(&ir_context);
+  // debug_print_ir_buffer(&ir_context);
 
   generate_qbe("out.ssa", &ir_context);
 
