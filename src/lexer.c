@@ -14,14 +14,14 @@ static inline bool reached_end(Lexer *l) {
   return l->current >= l->source_end;
 }
 
-static inline char peek(Lexer *l) {
+static inline const char peek(Lexer *l) {
   if (reached_end(l)) {
     return '\0';
   }
   return *l->current;
 }
 
-static inline char peek_next(Lexer *l) {
+static inline const char peek_next(Lexer *l) {
   if (l->current + 1 >= l->source_end) {
     return '\0';
   }
@@ -42,6 +42,10 @@ static inline bool is_alpha(char c) {
 
 static inline bool is_digit(char c) {
   return c >= '0' && c <= '9';
+}
+
+static inline bool is_hex_digit(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
 static inline bool is_alnum(char c) {
@@ -98,9 +102,31 @@ static Token error_token(Lexer *lex, const char *message) {
 }
 
 static Token number(Lexer *lex) {
-  bool is_float = false;
+  // Hex numbers
+  if (lex->token_start[0] == '0' && (peek(lex) == 'x' || peek(lex) == 'X')) {
+    advance(lex);
 
-  // TODO: Handle hex and binary literals
+    while (is_hex_digit(peek(lex)) || peek(lex) == '_') {
+      advance(lex);
+    }
+
+    return new_token(lex, TOKEN_INT);
+  }
+
+  // Binary numbers
+  if (lex->token_start[0] == '0' && (peek(lex) == 'b' || peek(lex) == 'B')) {
+    advance(lex);
+
+    while (peek(lex) == '0' || peek(lex) == '1' || peek(lex) == '_') {
+      advance(lex);
+    }
+
+    return new_token(lex, TOKEN_INT);
+  }
+
+  // Decimal and floating-point numbers
+
+  bool is_float = false;
 
   while (is_digit(peek(lex)) || peek(lex) == '_') {
     advance(lex);

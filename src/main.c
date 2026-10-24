@@ -15,7 +15,7 @@
 int main(int argc, char **argv) {
   // char *source = "1+2;";
   // char *source = "(1+2)*3--4;";
-  char *source = "var x: int = 1+2; x + 4;";
+  char *source = "var x: int = 1_0+02; x + 0x0F; 0b101 + x;";
 
   CompilationUnit comp_unit = {0};
 

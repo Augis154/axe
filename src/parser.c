@@ -139,10 +139,24 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
 
 static AstExpr *parse_int_literal(Parser *parser) {
   uint8_t base = 10;
+
+  const char *start = parser->current.lexeme;
+  const char *end = start + parser->current.lexeme_len;
+
+  if (parser->current.lexeme_len > 2 && start[0] == '0') {
+    if (start[1] == 'x' || start[1] == 'X') {
+      base = 16;
+      start += 2;
+    } else if (start[1] == 'b' || start[1] == 'B') {
+      base = 2;
+      start += 2;
+    }
+  }
+
   uint64_t value = 0;
 
-  for (size_t i = 0; i < parser->current.lexeme_len; i++) {
-    char c = parser->current.lexeme[i];
+  for (const char *current = start; current < end; current++) {
+    char c = *current;
     if (c == '_') {
       continue;
     }
