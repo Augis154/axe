@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "frontend.h"
+#include "lib/array.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -25,28 +26,11 @@ typedef struct {
 
 static const ParseRule rules[TOKEN_COUNT];
 
-static const UnaryOp token_to_unary_op[TOKEN_COUNT];
-static const BinaryOp token_to_binary_op[TOKEN_COUNT];
-
 static const ParseRule *get_rule(TokenType type) {
   if (type < 0 || type >= TOKEN_COUNT) {
     return NULL;
   }
   return &rules[type];
-}
-
-static const UnaryOp get_unary_op(TokenType type) {
-  if (type < 0 || type >= TOKEN_COUNT) {
-    return -1; // Invalid UnaryOp
-  }
-  return token_to_unary_op[type];
-}
-
-static const BinaryOp get_binary_op(TokenType type) {
-  if (type < 0 || type >= TOKEN_COUNT) {
-    return -1; // Invalid BinaryOp
-  }
-  return token_to_binary_op[type];
 }
 
 static void error_at(Parser *parser, Token token, const char *message) {
@@ -156,6 +140,45 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
   }
 
   return left;
+}
+
+static const UnaryOp get_unary_op(TokenType type) {
+  switch (type) {
+  case TOKEN_MINUS:
+    return UNARYOP_NEGATE;
+  default:
+    error_at(NULL, (Token){.type = type}, "Invalid unary operator.");
+    return -1;
+  }
+}
+
+static const BinaryOp get_binary_op(TokenType type) {
+  switch (type) {
+  case TOKEN_PLUS:
+    return BINARYOP_ADD;
+  case TOKEN_MINUS:
+    return BINARYOP_SUB;
+  case TOKEN_STAR:
+    return BINARYOP_MUL;
+  case TOKEN_SLASH:
+    return BINARYOP_DIV;
+
+  case TOKEN_EQEQ:
+    return BINARYOP_EQEQ;
+  case TOKEN_NOT_EQ:
+    return BINARYOP_NOT_EQ;
+  case TOKEN_LESS:
+    return BINARYOP_LESS;
+  case TOKEN_GREATER:
+    return BINARYOP_GREATER;
+  case TOKEN_LESS_EQ:
+    return BINARYOP_LESS_EQ;
+  case TOKEN_GREATER_EQ:
+    return BINARYOP_GREATER_EQ;
+  default:
+    error_at(NULL, (Token){.type = type}, "Invalid binary operator.");
+    return -1;
+  }
 }
 
 static AstExpr *parse_int_literal(Parser *parser) {
@@ -279,6 +302,31 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 
 // Statement parsing functions
 
+static AstStmt *parse_block(Parser *parser) {
+  consume(parser, TOKEN_OBRACE, "Expected '{' to start block.");
+
+  AstStmt **stmts = NULL;
+
+  while (!check(parser, TOKEN_CBRACE) && !check(parser, TOKEN_EOF)) {
+    AstStmt *stmt = parse_statement(parser);
+    if (stmt) {
+      da_append(stmts, stmt);
+    }
+  }
+
+  consume(parser, TOKEN_CBRACE, "Expected '}' to end block.");
+
+  AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_BLOCK);
+  AstStmtBlock *block = &block_stmt->stmt_block;
+
+  block->count = da_len(stmts);
+  block->statements = arena_alloc(&parser->comp_unit->ast_arena, sizeof(AstStmt *) * block->count);
+  memcpy(block->statements, stmts, sizeof(AstStmt *) * block->count);
+  da_free(stmts);
+
+  return block_stmt;
+}
+
 static AstStmt *parse_expression_statement(Parser *parser) {
   AstExpr *expr = parse_expression(parser);
 
@@ -291,7 +339,7 @@ static AstStmt *parse_expression_statement(Parser *parser) {
 }
 
 static AstStmt *parse_variable_declaration(Parser *parser) {
-  advance(parser);
+  consume(parser, TOKEN_VAR, "Expected 'var' keyword for variable declaration.");
   consume(parser, TOKEN_IDENT, "Expected variable name after 'var'.");
 
   Token name_token = parser->current;
@@ -301,7 +349,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
     consume(parser, TOKEN_IDENT, "Expected type name after ':'.");
 
     // TODO: Properly parse type names
-    const char *type_name = parse_identifier_name(parser, parser->current);
+    type_name = parse_identifier_name(parser, parser->current);
   }
 
   AstExpr *init_expr = NULL;
@@ -329,6 +377,26 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
   return stmt;
 }
 
+static AstStmt *parse_if_statement(Parser *parser) {
+  consume(parser, TOKEN_IF, "Expected 'if' keyword for if statement.");
+
+  AstExpr *condition = parse_expression(parser);
+
+  AstStmt *then_branch = parse_block(parser);
+
+  AstStmt *else_branch = NULL;
+  if (match(parser, TOKEN_ELSE)) {
+    else_branch = parse_statement(parser);
+  }
+
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_IF);
+  stmt->stmt_if.condition = condition;
+  stmt->stmt_if.then_branch = then_branch;
+  stmt->stmt_if.else_branch = else_branch;
+
+  return stmt;
+}
+
 // Declaration parsing functions
 
 // Parser public functions
@@ -348,8 +416,12 @@ AstExpr *parse_expression(Parser *parser) {
 
 AstStmt *parse_statement(Parser *parser) {
   switch (parser->next.type) {
+  case TOKEN_OBRACE:
+    return parse_block(parser);
   case TOKEN_VAR:
     return parse_variable_declaration(parser);
+  case TOKEN_IF:
+    return parse_if_statement(parser);
   default:
     return parse_expression_statement(parser);
   }
@@ -363,28 +435,23 @@ AstDecl *parse_declaration(Parser *parser) {
 // Parse rules and operator mappings
 
 static const ParseRule rules[TOKEN_COUNT] = {
+  [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
   [TOKEN_INT] = {PREC_NONE, parse_int_literal, NULL},
   [TOKEN_FLOAT] = {PREC_NONE, parse_float_literal, NULL},
-
-  [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
 
   [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},
   [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
   [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
   [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
 
+  [TOKEN_LESS] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_GREATER] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_NOT_EQ] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_EQEQ] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_LESS_EQ] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_GREATER_EQ] = {PREC_TERM, NULL, parse_binary},
+
   [TOKEN_EQUAL] = {PREC_ASSIGNMENT, NULL, parse_assignment},
 
   [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
-};
-
-static const UnaryOp token_to_unary_op[TOKEN_COUNT] = {
-  [TOKEN_MINUS] = UNARYOP_NEGATE,
-};
-
-static const BinaryOp token_to_binary_op[TOKEN_COUNT] = {
-  [TOKEN_PLUS] = BINARYOP_ADD,
-  [TOKEN_MINUS] = BINARYOP_SUB,
-  [TOKEN_STAR] = BINARYOP_MUL,
-  [TOKEN_SLASH] = BINARYOP_DIV,
 };

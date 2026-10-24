@@ -1,3 +1,9 @@
-var x: int = 1_0 + 02;
-x = 0x0F + x;
-x - 0b101;
+var x: int;
+
+if x == 2 {
+  x = 5;
+} else {
+  x = 10;
+}
+
+x;

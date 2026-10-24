@@ -7,39 +7,60 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define KEYWORDS(X) X("var", TOKEN_VAR)
+#define TOKENS_SPECIAL(X) \
+  X(TOKEN_ERROR, "ERROR") \
+  X(TOKEN_EOF, "EOF")
+
+#define TOKENS_OPERATORS(X) \
+  X(TOKEN_PLUS, "+")        \
+  X(TOKEN_MINUS, "-")       \
+  X(TOKEN_STAR, "*")        \
+  X(TOKEN_SLASH, "/")       \
+  X(TOKEN_EQUAL, "=")       \
+  X(TOKEN_BANG, "!")        \
+                            \
+  X(TOKEN_LESS, "<")        \
+  X(TOKEN_GREATER, ">")     \
+                            \
+  X(TOKEN_EQEQ, "==")       \
+  X(TOKEN_NOT_EQ, "!=")     \
+  X(TOKEN_LESS_EQ, "<=")    \
+  X(TOKEN_GREATER_EQ, ">=")
+
+#define TOKENS_SYMBOLS(X) \
+  X(TOKEN_OPAREN, "(")    \
+  X(TOKEN_CPAREN, ")")    \
+  X(TOKEN_OBRACE, "{")    \
+  X(TOKEN_CBRACE, "}")    \
+                          \
+  X(TOKEN_COLON, ":")     \
+  X(TOKEN_SEMICOLON, ";")
+
+#define TOKENS_LITERALS(X)     \
+  X(TOKEN_IDENT, "Identifier") \
+  X(TOKEN_INT, "Int")          \
+  X(TOKEN_FLOAT, "Float")      \
+  X(TOKEN_CHAR, "Char")        \
+  X(TOKEN_STRING, "String")
+
+#define TOKENS_KEYWORDS(X) \
+  X(TOKEN_VAR, "var")      \
+  X(TOKEN_IF, "if")        \
+  X(TOKEN_ELSE, "else")
+
+#define TOKEN_LIST(X) \
+  TOKENS_SPECIAL(X)   \
+  TOKENS_OPERATORS(X) \
+  TOKENS_SYMBOLS(X)   \
+  TOKENS_LITERALS(X)  \
+  TOKENS_KEYWORDS(X)
 
 typedef enum {
-  TOKEN_ERROR = 0,
-  TOKEN_EOF,
+#define TOKEN_ENUM(token, name) token,
+  TOKEN_LIST(TOKEN_ENUM)
+#undef TOKEN_ENUM
 
-  TOKEN_PLUS,  // +
-  TOKEN_MINUS, // -
-  TOKEN_STAR,  // *
-  TOKEN_SLASH, // /
-  TOKEN_EQUAL, // =
-
-  TOKEN_OPAREN, // (
-  TOKEN_CPAREN, // )
-
-  TOKEN_COLON,     // :
-  TOKEN_SEMICOLON, // ;
-
-  // Literals
-  TOKEN_IDENT,
-
-  // Types
-  TOKEN_INT,
-  TOKEN_FLOAT,
-  TOKEN_CHAR,
-  TOKEN_STRING,
-
-// Keywords
-#define KEYWORD_TOKEN(name, token) token
-  KEYWORDS(KEYWORD_TOKEN),
-#undef KEYWORD_TOKEN
-
-  TOKEN_COUNT,
+    TOKEN_COUNT,
 } TokenType;
 
 typedef struct {
