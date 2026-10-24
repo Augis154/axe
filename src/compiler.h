@@ -13,7 +13,8 @@ typedef struct {
   const char *source;
   size_t source_len;
 
-  Arena ast_arena;
+  Arena arena;
+
   StrTable intern_table;
   StrTable symbol_table;
 

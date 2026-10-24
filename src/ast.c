@@ -5,12 +5,13 @@
 static uint32_t expr_id = 1;
 static uint32_t stmt_id = 1;
 static uint32_t decl_id = 1;
+static uint32_t type_id = 1;
 
 void ast_arena_free(Arena *arena) {
   arena_free(arena);
 }
 
-AstExpr *ast_expr_new(Arena *arena, AstExprType type) {
+AstExpr *ast_expr_new(Arena *arena, AstExprKind type) {
   AstExpr *expr = arena_alloc(arena, sizeof(AstExpr));
 
   memset(expr, 0, sizeof(AstExpr));
@@ -20,7 +21,7 @@ AstExpr *ast_expr_new(Arena *arena, AstExprType type) {
   return expr;
 }
 
-AstStmt *ast_stmt_new(Arena *arena, AstStmtType type) {
+AstStmt *ast_stmt_new(Arena *arena, AstStmtKind type) {
   AstStmt *stmt = arena_alloc(arena, sizeof(AstStmt));
 
   memset(stmt, 0, sizeof(AstStmt));
@@ -30,7 +31,7 @@ AstStmt *ast_stmt_new(Arena *arena, AstStmtType type) {
   return stmt;
 }
 
-AstDecl *ast_decl_new(Arena *arena, AstDeclType type) {
+AstDecl *ast_decl_new(Arena *arena, AstDeclKind type) {
   AstDecl *decl = arena_alloc(arena, sizeof(AstDecl));
 
   memset(decl, 0, sizeof(AstDecl));
@@ -38,4 +39,14 @@ AstDecl *ast_decl_new(Arena *arena, AstDeclType type) {
   decl->id = decl_id++;
 
   return decl;
+}
+
+AstType *ast_type_new(Arena *arena, AstTypeKind kind) {
+  AstType *type = arena_alloc(arena, sizeof(AstType));
+
+  memset(type, 0, sizeof(AstType));
+  type->kind = kind;
+  type->id = type_id++;
+
+  return type;
 }

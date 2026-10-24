@@ -109,5 +109,6 @@ const char *lexer_render_token_type(TokenType type);
 AstExpr *parse_expression(Parser *parser);
 AstStmt *parse_statement(Parser *parser);
 AstDecl *parse_declaration(Parser *parser);
+AstType *parse_type(Parser *parser);
 
 #endif // FRONTEND_H
