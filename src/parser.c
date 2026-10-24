@@ -397,6 +397,20 @@ static AstStmt *parse_if_statement(Parser *parser) {
   return stmt;
 }
 
+static AstStmt *parse_while_statement(Parser *parser) {
+  consume(parser, TOKEN_WHILE, "Expected 'while' keyword for while statement.");
+
+  AstExpr *condition = parse_expression(parser);
+
+  AstStmt *body = parse_block(parser);
+
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_WHILE);
+  stmt->stmt_while.condition = condition;
+  stmt->stmt_while.body = body;
+
+  return stmt;
+}
+
 // Declaration parsing functions
 
 // Parser public functions
@@ -420,8 +434,12 @@ AstStmt *parse_statement(Parser *parser) {
     return parse_block(parser);
   case TOKEN_VAR:
     return parse_variable_declaration(parser);
+
   case TOKEN_IF:
     return parse_if_statement(parser);
+  case TOKEN_WHILE:
+    return parse_while_statement(parser);
+
   default:
     return parse_expression_statement(parser);
   }

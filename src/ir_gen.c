@@ -258,6 +258,44 @@ static void handle_if_statement(IrContext *context, AstStmt *stmt) {
   da_append(context->buffer, end_label_instr);
 }
 
+static void handle_while_statement(IrContext *context, AstStmt *stmt) {
+  if (!stmt) {
+    return;
+  }
+
+  IrLabel start_label = next_label(context);
+  IrLabel end_label = next_label(context);
+
+  IrInstr start_label_instr = {
+    .op = IR_INST_LABEL,
+    .target = start_label,
+  };
+  da_append(context->buffer, start_label_instr);
+
+  IrReg cond_reg = handle_expression(context, stmt->stmt_while.condition);
+
+  IrInstr cond_jump_instr = {
+    .op = IR_INST_JZ,
+    .arg1 = cond_reg,
+    .target = end_label,
+  };
+  da_append(context->buffer, cond_jump_instr);
+
+  handle_statement(context, stmt->stmt_while.body);
+
+  IrInstr jump_to_start_instr = {
+    .op = IR_INST_JUMP,
+    .target = start_label,
+  };
+  da_append(context->buffer, jump_to_start_instr);
+
+  IrInstr end_label_instr = {
+    .op = IR_INST_LABEL,
+    .target = end_label,
+  };
+  da_append(context->buffer, end_label_instr);
+}
+
 static void handle_statement(IrContext *context, AstStmt *stmt) {
   if (!stmt) {
     return;
@@ -271,8 +309,11 @@ static void handle_statement(IrContext *context, AstStmt *stmt) {
     return;
   case STMT_VAR_DECL:
     return handle_var_declaration(context, stmt);
+
   case STMT_IF:
     return handle_if_statement(context, stmt);
+  case STMT_WHILE:
+    return handle_while_statement(context, stmt);
 
   default:
     fprintf(stderr, "gen_ir_statement: unhandled AST statement type %d\n", stmt->type);
