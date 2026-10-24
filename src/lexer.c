@@ -198,6 +198,10 @@ Token lexer_get_token(Lexer *lex) {
     return new_token(lex, TOKEN_OPAREN);
   case ')':
     return new_token(lex, TOKEN_CPAREN);
+  case '{':
+    return new_token(lex, TOKEN_OBRACE);
+  case '}':
+    return new_token(lex, TOKEN_CBRACE);
 
   case '+':
     return new_token(lex, TOKEN_PLUS);
@@ -209,7 +213,29 @@ Token lexer_get_token(Lexer *lex) {
     return new_token(lex, TOKEN_SLASH);
 
   case '=':
+    if (peek(lex) == '=') {
+      advance(lex);
+      return new_token(lex, TOKEN_EQEQ);
+    }
     return new_token(lex, TOKEN_EQUAL);
+  case '!':
+    if (peek(lex) == '=') {
+      advance(lex);
+      return new_token(lex, TOKEN_NOT_EQ);
+    }
+    return new_token(lex, TOKEN_BANG);
+  case '<':
+    if (peek(lex) == '=') {
+      advance(lex);
+      return new_token(lex, TOKEN_LESS_EQ);
+    }
+    return new_token(lex, TOKEN_LESS);
+  case '>':
+    if (peek(lex) == '=') {
+      advance(lex);
+      return new_token(lex, TOKEN_GREATER_EQ);
+    }
+    return new_token(lex, TOKEN_GREATER);
 
   default:
     if (is_digit(c)) {
@@ -237,37 +263,15 @@ const char *lexer_render_token_type(TokenType type) {
 }
 
 static const Keyword keywords[] = {
-#define KEYWORD_TOKEN(name, token) {name, strlen(name), token},
-  KEYWORDS(KEYWORD_TOKEN)
-#undef KEYWORD_TOKEN
+#define KEYWORD_DEF(token, name) {name, strlen(name), token},
+  TOKENS_KEYWORDS(KEYWORD_DEF)
+#undef KEYWORD_DEF
 };
 
 static const size_t KEYWORD_COUNT = sizeof(keywords) / sizeof(keywords[0]);
 
 static const char *token_strings[TOKEN_COUNT] = {
-  [TOKEN_ERROR] = "Error",
-  [TOKEN_EOF] = "EOF",
-
-  [TOKEN_PLUS] = "+",
-  [TOKEN_MINUS] = "-",
-  [TOKEN_STAR] = "*",
-  [TOKEN_SLASH] = "/",
-  [TOKEN_EQUAL] = "=",
-
-  [TOKEN_COLON] = ":",
-  [TOKEN_SEMICOLON] = ";",
-
-  [TOKEN_OPAREN] = "(",
-  [TOKEN_CPAREN] = ")",
-
-  [TOKEN_IDENT] = "Identifier",
-
-  [TOKEN_INT] = "Integer",
-  [TOKEN_FLOAT] = "Float",
-  [TOKEN_CHAR] = "Character",
-  [TOKEN_STRING] = "String",
-
-#define KEYWORD_TOKEN(name, token) [token] = name
-  KEYWORDS(KEYWORD_TOKEN),
-#undef KEYWORD_TOKEN
+#define TOKEN_NAME(token, name) [token] = name,
+  TOKEN_LIST(TOKEN_NAME)
+#undef TOKEN_NAME
 };

@@ -147,6 +147,16 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
   }
 
   switch (stmt->type) {
+  case STMT_BLOCK:
+    printf("Block Statement:\n");
+    for (size_t i = 0; i < stmt->stmt_block.count; i++) {
+      print_indent(1);
+      printf("Statement %zu:\n", i);
+      print_indent(2);
+      debug_print_ast_stmt(arena, stmt->stmt_block.statements[i]);
+    }
+    break;
+
   case STMT_EXPRESSION:
     printf("Expression Statement:\n");
     print_indent(1);
@@ -165,6 +175,22 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
       printf("Init: ");
       debug_print_ast_sexpr(arena, stmt->stmt_var_decl.init);
       printf("\n");
+    }
+    break;
+
+  case STMT_IF:
+    printf("If Statement:\n");
+    print_indent(1);
+    printf("Condition: ");
+    debug_print_ast_sexpr(arena, stmt->stmt_if.condition);
+    printf("\n");
+    print_indent(1);
+    printf("Then Branch:\n");
+    debug_print_ast_stmt(arena, stmt->stmt_if.then_branch);
+    if (stmt->stmt_if.else_branch) {
+      print_indent(1);
+      printf("Else Branch:\n");
+      debug_print_ast_stmt(arena, stmt->stmt_if.else_branch);
     }
     break;
 
@@ -224,6 +250,38 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
       printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
 
+    case IR_INST_CMP_EQ:
+      printf("%zu: r%u = r%u == r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_NE:
+      printf("%zu: r%u = r%u != r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_LT:
+      printf("%zu: r%u = r%u < r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_GT:
+      printf("%zu: r%u = r%u > r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_LE:
+      printf("%zu: r%u = r%u <= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_GE:
+      printf("%zu: r%u = r%u >= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+
+    case IR_INST_LABEL:
+      printf("%zu: @l%u:\n", i, inst->target.id);
+      break;
+    case IR_INST_JUMP:
+      printf("%zu: JUMP @l%u\n", i, inst->target.id);
+      break;
+    case IR_INST_JZ:
+      printf("%zu: JZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
+      break;
+    case IR_INST_JNZ:
+      printf("%zu: JNZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
+      break;
+
     default:
       printf("%zu: Unknown instruction\n", i);
       break;
@@ -240,4 +298,11 @@ static const char *binop_strings[BINARYOP_COUNT] = {
   [BINARYOP_SUB] = "-",
   [BINARYOP_MUL] = "*",
   [BINARYOP_DIV] = "/",
+
+  [BINARYOP_EQEQ] = "==",
+  [BINARYOP_NOT_EQ] = "!=",
+  [BINARYOP_LESS] = "<",
+  [BINARYOP_GREATER] = ">",
+  [BINARYOP_LESS_EQ] = "<=",
+  [BINARYOP_GREATER_EQ] = ">=",
 };

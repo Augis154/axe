@@ -22,6 +22,13 @@ typedef enum {
   BINARYOP_MUL,
   BINARYOP_DIV,
 
+  BINARYOP_LESS,
+  BINARYOP_GREATER,
+  BINARYOP_EQEQ,
+  BINARYOP_NOT_EQ,
+  BINARYOP_LESS_EQ,
+  BINARYOP_GREATER_EQ,
+
   BINARYOP_COUNT,
 } BinaryOp;
 
@@ -96,9 +103,16 @@ struct AstExpr_ {
 typedef enum {
   STMT_INVALID,
 
+  STMT_BLOCK,
   STMT_EXPRESSION,
   STMT_VAR_DECL,
+  STMT_IF,
 } AstStmtType;
+
+typedef struct {
+  AstStmt **statements;
+  size_t count;
+} AstStmtBlock;
 
 typedef struct {
   AstExpr *expression;
@@ -110,13 +124,21 @@ typedef struct {
   AstExpr *init;
 } AstStmtVarDecl;
 
+typedef struct {
+  AstExpr *condition;
+  AstStmt *then_branch;
+  AstStmt *else_branch;
+} AstIfStmt;
+
 struct AstStmt_ {
   AstStmtType type;
   uint32_t id;
 
   union {
+    AstStmtBlock stmt_block;
     AstStmtExpr stmt_expr;
     AstStmtVarDecl stmt_var_decl;
+    AstIfStmt stmt_if;
   };
 };
 

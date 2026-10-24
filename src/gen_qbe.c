@@ -50,6 +50,45 @@ void generate_qbe(const char *filename, IrContext *context) {
     case IR_INST_DIV:
       fprintf(file, "  %%r%u =w div %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
       break;
+
+    case IR_INST_CMP_EQ:
+      fprintf(file, "  %%r%u =w ceqw %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_NE:
+      fprintf(file, "  %%r%u =w cnew %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_LT:
+      fprintf(file, "  %%r%u =w csltw %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_GT:
+      fprintf(file, "  %%r%u =w csgtw %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_LE:
+      fprintf(file, "  %%r%u =w cslew %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg2.id);
+      break;
+    case IR_INST_CMP_GE:
+      fprintf(file, "  %%r%u =w csgew %%r%u, %%r%u\n", inst->res.id, inst->arg1.id, inst->arg1.id, inst->arg2.id);
+      break;
+
+    case IR_INST_LABEL:
+      fprintf(file, "@l%u\n", inst->target.id);
+      break;
+    case IR_INST_JUMP:
+      fprintf(file, "  jmp @l%u\n", inst->target.id);
+      break;
+    case IR_INST_JZ: {
+      uint32_t fallthrough_label = context->next_label++;
+      fprintf(file, "  jnz %%r%u, @l%u, @l%u\n", inst->arg1.id, fallthrough_label, inst->target.id);
+      fprintf(file, "@l%u\n", fallthrough_label);
+      break;
+    }
+    case IR_INST_JNZ: {
+      uint32_t fallthrough_label = context->next_label++;
+      fprintf(file, "  jnz %%r%u, @l%u, @l%u\n", inst->arg1.id, inst->target.id, fallthrough_label);
+      fprintf(file, "@l%u\n", fallthrough_label);
+      break;
+    }
+
     default:
       fprintf(file, "  %zu: Unknown instruction\n", i);
       break;

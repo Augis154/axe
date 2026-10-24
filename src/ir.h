@@ -21,17 +21,38 @@ typedef enum {
   IR_INST_SUB,
   IR_INST_MUL,
   IR_INST_DIV,
+
+  IR_INST_CMP_EQ,
+  IR_INST_CMP_NE,
+  IR_INST_CMP_LT,
+  IR_INST_CMP_GT,
+  IR_INST_CMP_LE,
+  IR_INST_CMP_GE,
+
+  IR_INST_LABEL,
+  IR_INST_JUMP,
+  IR_INST_JZ,
+  IR_INST_JNZ,
 } IrOp;
 
 typedef struct {
   uint32_t id;
 } IrReg;
 
+typedef struct {
+  uint32_t id;
+} IrLabel;
+
 #define NULL_REG ((IrReg){0})
+#define NULL_LABEL ((IrLabel){0})
 
 typedef struct {
   IrOp op;
-  IrReg res;
+
+  union {
+    IrReg res;
+    IrLabel target;
+  };
 
   union {
     struct {
@@ -49,6 +70,7 @@ typedef struct {
   IrInstr *buffer;
 
   uint32_t next_reg;
+  uint32_t next_label;
 } IrContext;
 
 void ir_gen_init(IrContext *context, CompilationUnit *comp_unit);
