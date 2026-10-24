@@ -13,17 +13,10 @@
 #include <string.h>
 
 int main(int argc, char **argv) {
-  // char *source = "1+2;";
-  // char *source = "(1+2)*3--4;";
-  char *source = "var x: int = 1_0+02; x + 0x0F; 0b101 + x;";
-
   CompilationUnit comp_unit = {0};
+  cu_init(&comp_unit);
 
-  st_init(&comp_unit.symbol_table, 1024);
-  st_init(&comp_unit.intern_table, 1024);
-
-  comp_unit.source = source;
-  comp_unit.source_len = strlen(source);
+  cu_read_source_file(&comp_unit, "test.axe");
 
   // Lexer lexer;
   // lexer_init(&lexer, &comp_unit);
@@ -65,7 +58,8 @@ int main(int argc, char **argv) {
   printf("Had error: %s\n", comp_unit.had_error ? "true" : "false");
 
   if (comp_unit.had_error) {
-    ast_arena_free(&comp_unit.ast_arena);
+    da_free(statements);
+    cu_free(&comp_unit);
     return 1;
   }
 
@@ -76,6 +70,7 @@ int main(int argc, char **argv) {
     AstStmt *stmt = &statements[i];
     emit_ir(&ir_context, stmt);
   }
+
   // emit_ir(&ir_context, root);
 
   debug_print_ir_buffer(&ir_context);
@@ -83,5 +78,9 @@ int main(int argc, char **argv) {
   generate_qbe("out.ssa", &ir_context);
 
   ir_buffer_free(&ir_context);
-  ast_arena_free(&comp_unit.ast_arena);
+
+  da_free(statements);
+  cu_free(&comp_unit);
+
+  return 0;
 }
