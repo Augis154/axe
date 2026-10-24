@@ -20,4 +20,9 @@ typedef struct {
   bool had_error;
 } CompilationUnit;
 
+void cu_init(CompilationUnit *comp_unit);
+void cu_free(CompilationUnit *comp_unit);
+
+void cu_read_source_file(CompilationUnit *comp_unit, const char *filename);
+
 #endif // COMPILER_H
