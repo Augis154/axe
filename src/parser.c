@@ -85,19 +85,27 @@ static void advance(Parser *parser) {
   }
 }
 
-static bool match(Parser *parser, TokenType type) {
-  if (parser->next.type == type) {
-    advance(parser);
-    return true;
-  }
-  return false;
+static inline bool check(Parser *parser, TokenType type) {
+  return parser->next.type == type;
 }
 
-#define expect(type, message)                \
-  if (!match(parser, type)) {                \
-    error_at(parser, parser->next, message); \
-    return NULL;                             \
+static bool match(Parser *parser, TokenType type) {
+  if (!check(parser, type)) {
+    return false;
   }
+
+  advance(parser);
+  return true;
+}
+
+static bool consume(Parser *parser, TokenType type, const char *message) {
+  if (match(parser, type)) {
+    return true;
+  }
+
+  error_at(parser, parser->next, message);
+  return false;
+}
 
 static const char *parse_identifier_name(Parser *parser, Token token) {
   if (token.type != TOKEN_IDENT) {
@@ -106,6 +114,19 @@ static const char *parse_identifier_name(Parser *parser, Token token) {
   }
 
   return st_intern_len(&parser->comp_unit->intern_table, token.lexeme, token.lexeme_len);
+}
+
+static inline bool is_lvalue(const AstExpr *node) {
+  if (!node) {
+    return false;
+  }
+
+  switch (node->type) {
+  case EXPR_IDENTIFIER:
+    return true;
+  default:
+    return false;
+  }
 }
 
 // Expression parsing functions
@@ -209,9 +230,24 @@ static AstExpr *parse_identifier(Parser *parser) {
 static AstExpr *parse_grouping(Parser *parser) {
   AstExpr *expr = parse_expression(parser);
 
-  expect(TOKEN_CPAREN, "Expected ')' after expression");
+  consume(parser, TOKEN_CPAREN, "Expected ')' after expression");
 
   return expr;
+}
+
+static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
+  if (!is_lvalue(left)) {
+    error_at(parser, parser->current, "Invalid assignment target.");
+    return NULL;
+  }
+
+  AstExpr *right = parse_precedence(parser, PREC_ASSIGNMENT);
+
+  AstExpr *assign_expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_ASSIGN);
+  assign_expr->assignment.target = left;
+  assign_expr->assignment.value = right;
+
+  return assign_expr;
 }
 
 static AstExpr *parse_unary(Parser *parser) {
@@ -246,7 +282,7 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 static AstStmt *parse_expression_statement(Parser *parser) {
   AstExpr *expr = parse_expression(parser);
 
-  expect(TOKEN_SEMICOLON, "Expected ';' after expression");
+  consume(parser, TOKEN_SEMICOLON, "Expected ';' after expression");
 
   AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_EXPRESSION);
   stmt->stmt_expr.expression = expr;
@@ -256,13 +292,13 @@ static AstStmt *parse_expression_statement(Parser *parser) {
 
 static AstStmt *parse_variable_declaration(Parser *parser) {
   advance(parser);
-  expect(TOKEN_IDENT, "Expected variable name after 'var'.");
+  consume(parser, TOKEN_IDENT, "Expected variable name after 'var'.");
 
   Token name_token = parser->current;
 
   const char *type_name = NULL;
   if (match(parser, TOKEN_COLON)) {
-    expect(TOKEN_IDENT, "Expected type name after ':'.");
+    consume(parser, TOKEN_IDENT, "Expected type name after ':'.");
 
     // TODO: Properly parse type names
     const char *type_name = parse_identifier_name(parser, parser->current);
@@ -273,7 +309,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
     init_expr = parse_expression(parser);
   }
 
-  expect(TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
+  consume(parser, TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
 
   if (!type_name && !init_expr) {
     error_at(parser, name_token, "Variable declaration must have either a type annotation or an initializer.");
@@ -336,6 +372,8 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
   [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
   [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
+
+  [TOKEN_EQUAL] = {PREC_ASSIGNMENT, NULL, parse_assignment},
 
   [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
 };

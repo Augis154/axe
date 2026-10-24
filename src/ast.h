@@ -33,6 +33,8 @@ typedef enum {
   EXPR_LITERAL,
   EXPR_IDENTIFIER,
 
+  EXPR_ASSIGN,
+
   EXPR_UNARY,
   EXPR_BINARY,
 } AstExprType;
@@ -59,6 +61,11 @@ typedef struct {
 } AstIdentifier;
 
 typedef struct {
+  AstExpr *target;
+  AstExpr *value;
+} AstAssignment;
+
+typedef struct {
   UnaryOp op;
   AstExpr *operand;
 } AstExprUnary;
@@ -76,6 +83,8 @@ struct AstExpr_ {
   union {
     AstLiteral literal;
     AstIdentifier identifier;
+
+    AstAssignment assignment;
 
     AstExprUnary expr_unary;
     AstExprBinary expr_binary;

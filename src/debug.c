@@ -108,8 +108,17 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
       printf("<unknown literal type>");
     }
     break;
+
   case EXPR_IDENTIFIER:
     printf("%s", node->identifier.name);
+    break;
+
+  case EXPR_ASSIGN:
+    printf("(= ");
+    debug_print_ast_sexpr(arena, node->assignment.target);
+    printf(" ");
+    debug_print_ast_sexpr(arena, node->assignment.value);
+    printf(")");
     break;
 
   case EXPR_UNARY:
@@ -127,7 +136,7 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     break;
 
   default:
-    printf("<unknown node type>");
+    printf("<unknown expr node type>");
   }
 }
 
@@ -190,10 +199,10 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
       break;
 
     case IR_INST_LOAD_VAR:
-      printf("%zu: r%u = LOAD_VAR(var_name=%s)\n", i, inst->res.id, inst->var_name);
+      printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var_name);
       break;
     case IR_INST_STORE_VAR:
-      printf("%zu: STORE_VAR(var_name=%s, r%u)\n", i, inst->var_name, inst->res.id);
+      printf("%zu: STORE_VAR %s = r%u\n", i, inst->var_name, inst->res.id);
       break;
 
       // Unary operations
