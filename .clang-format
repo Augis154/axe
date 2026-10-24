@@ -15,5 +15,6 @@ SortIncludes:
 AlignEscapedNewlines: LeftWithLastLine
 AlignArrayOfStructures: None
 BinPackArguments: false
+BinPackLongBracedList: false
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortBlocksOnASingleLine: Empty

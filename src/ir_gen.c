@@ -23,43 +23,51 @@ static IrReg handle_expression(IrContext *context, AstExpr *node);
 
 static IrOp get_unary_ir_op(UnaryOp op) {
   switch (op) {
-  case UNARYOP_NEGATE:
+  case UNOP_NEGATE:
     return IR_INST_NEGATE;
-  default:
-    fprintf(stderr, "get_unary_ir_op: unhandled UnaryOp %d\n", op);
+  case UNOP_NOT:
+    return IR_INST_NOT;
+
+  case UNOP_COUNT:
+    fprintf(stderr, "get_unary_ir_op: UNOP_COUNT is not a valid operator\n");
     exit(EXIT_FAILURE);
   }
+
+  fprintf(stderr, "get_unary_ir_op: unhandled UNOP %d\n", op);
+  exit(EXIT_FAILURE);
 }
 
 static IrOp get_binary_ir_op(BinaryOp op) {
   switch (op) {
-
-  case BINARYOP_ADD:
+  case BINOP_ADD:
     return IR_INST_ADD;
-  case BINARYOP_SUB:
+  case BINOP_SUB:
     return IR_INST_SUB;
-  case BINARYOP_MUL:
+  case BINOP_MUL:
     return IR_INST_MUL;
-  case BINARYOP_DIV:
+  case BINOP_DIV:
     return IR_INST_DIV;
 
-  case BINARYOP_LESS:
+  case BINOP_LESS:
     return IR_INST_CMP_LT;
-  case BINARYOP_GREATER:
+  case BINOP_GREATER:
     return IR_INST_CMP_GT;
-  case BINARYOP_EQEQ:
+  case BINOP_EQEQ:
     return IR_INST_CMP_EQ;
-  case BINARYOP_NOT_EQ:
+  case BINOP_NOT_EQ:
     return IR_INST_CMP_NE;
-  case BINARYOP_LESS_EQ:
+  case BINOP_LESS_EQ:
     return IR_INST_CMP_LE;
-  case BINARYOP_GREATER_EQ:
+  case BINOP_GREATER_EQ:
     return IR_INST_CMP_GE;
 
-  default:
-    fprintf(stderr, "get_binary_ir_op: unhandled BinaryOp %d\n", op);
+  case BINOP_COUNT:
+    fprintf(stderr, "get_binary_ir_op: BINOP_COUNT is not a valid operator\n");
     exit(EXIT_FAILURE);
   }
+
+  fprintf(stderr, "get_binary_ir_op: unhandled BINOP %d\n", op);
+  exit(EXIT_FAILURE);
 }
 
 static IrReg handle_literal(IrContext *context, AstExpr *node) {
@@ -166,21 +174,23 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
 
   case EXPR_UNARY:
     return handle_unary_op(context, node);
-
   case EXPR_BINARY:
     return handle_binary_op(context, node);
 
-  default:
-    fprintf(stderr, "gen_ir_expression: unhandled AST node type %d\n", node->type);
+  case EXPR_INVALID:
+    fprintf(stderr, "handle_expression: encountered EXPR_INVALID node\n");
     exit(EXIT_FAILURE);
   }
+
+  fprintf(stderr, "gen_ir_expression: unhandled AST node type %d\n", node->type);
+  exit(EXIT_FAILURE);
 }
 
 // Statement handling
 
 static void handle_statement(IrContext *context, AstStmt *stmt);
 
-static void handle_block(IrContext *context, AstStmt *stmt) {
+static void handle_stmt_block(IrContext *context, AstStmt *stmt) {
   if (!stmt) {
     return;
   }
@@ -191,7 +201,15 @@ static void handle_block(IrContext *context, AstStmt *stmt) {
   }
 }
 
-static void handle_var_declaration(IrContext *context, AstStmt *stmt) {
+static void handle_stmt_expression(IrContext *context, AstStmt *stmt) {
+  if (!stmt) {
+    return;
+  }
+
+  handle_expression(context, stmt->stmt_expr.expression);
+}
+
+static void handle_stmt_var_decl(IrContext *context, AstStmt *stmt) {
   if (!stmt) {
     return;
   }
@@ -216,7 +234,7 @@ static void handle_var_declaration(IrContext *context, AstStmt *stmt) {
   da_append(context->buffer, inst);
 }
 
-static void handle_if_statement(IrContext *context, AstStmt *stmt) {
+static void handle_stmt_if(IrContext *context, AstStmt *stmt) {
   if (!stmt) {
     return;
   }
@@ -258,7 +276,7 @@ static void handle_if_statement(IrContext *context, AstStmt *stmt) {
   da_append(context->buffer, end_label_instr);
 }
 
-static void handle_while_statement(IrContext *context, AstStmt *stmt) {
+static void handle_stmt_while(IrContext *context, AstStmt *stmt) {
   if (!stmt) {
     return;
   }
@@ -303,22 +321,24 @@ static void handle_statement(IrContext *context, AstStmt *stmt) {
 
   switch (stmt->type) {
   case STMT_BLOCK:
-    return handle_block(context, stmt);
+    return handle_stmt_block(context, stmt);
   case STMT_EXPRESSION:
-    handle_expression(context, stmt->stmt_expr.expression);
-    return;
+    return handle_stmt_expression(context, stmt);
   case STMT_VAR_DECL:
-    return handle_var_declaration(context, stmt);
+    return handle_stmt_var_decl(context, stmt);
 
   case STMT_IF:
-    return handle_if_statement(context, stmt);
+    return handle_stmt_if(context, stmt);
   case STMT_WHILE:
-    return handle_while_statement(context, stmt);
+    return handle_stmt_while(context, stmt);
 
-  default:
-    fprintf(stderr, "gen_ir_statement: unhandled AST statement type %d\n", stmt->type);
+  case STMT_INVALID:
+    fprintf(stderr, "handle_statement: encountered STMT_INVALID node\n");
     exit(EXIT_FAILURE);
   }
+
+  fprintf(stderr, "gen_ir_statement: unhandled AST statement type %d\n", stmt->type);
+  exit(EXIT_FAILURE);
 }
 
 void ir_buffer_free(IrContext *context) {

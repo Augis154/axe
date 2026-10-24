@@ -62,10 +62,10 @@ typedef enum {
 #undef TOKEN_ENUM
 
     TOKEN_COUNT,
-} TokenType;
+} TokenKind;
 
 typedef struct {
-  TokenType type;
+  TokenKind kind;
 
   size_t line;
 
@@ -76,7 +76,7 @@ typedef struct {
 typedef struct {
   const char *name;
   size_t name_len;
-  TokenType type;
+  TokenKind kind;
 } Keyword;
 
 typedef struct {
@@ -104,7 +104,7 @@ void parser_init(Parser *parser, CompilationUnit *comp_unit);
 
 Token lexer_get_token(Lexer *lex);
 
-const char *lexer_render_token_type(TokenType type);
+const char *lexer_render_token_kind(TokenKind kind);
 
 AstExpr *parse_expression(Parser *parser);
 AstStmt *parse_statement(Parser *parser);

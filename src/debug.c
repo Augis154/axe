@@ -1,97 +1,42 @@
 #include "debug.h"
-#include "ast.h"
 
 #include "lib/array.h"
 
 #include <stdio.h>
 
-static const char *unop_strings[UNARYOP_COUNT];
-static const char *binop_strings[BINARYOP_COUNT];
+static const char *token_strings[TOKEN_COUNT];
+static const char *unop_strings[UNOP_COUNT];
+static const char *binop_strings[BINOP_COUNT];
 
 static void print_indent(int indent) {
   printf("%*s", indent * 2, "");
 }
 
-static void print_ast_node(Arena *arena, AstExpr *node, int indent);
-
-static void print_ast_field(const char *label, Arena *arena, AstExpr *node, int indent) {
-  print_indent(indent);
-  printf("%s\n", label);
-  if (node) {
-    print_ast_node(arena, node, indent + 1);
-  } else {
-    print_indent(indent + 1);
-    printf("<null>\n");
+static const char *render_token_kind(TokenKind kind) {
+  if (kind < 0 || kind >= TOKEN_COUNT) {
+    return "Unknown";
   }
-}
-
-static void print_ast_node(Arena *arena, AstExpr *node, int indent) {
-  if (!node) {
-    print_indent(indent);
-    printf("<null>\n");
-    return;
-  }
-
-  print_indent(indent);
-
-  switch (node->type) {
-  case EXPR_INVALID:
-    printf("Invalid\n");
-    break;
-  case EXPR_LITERAL:
-    switch (node->literal.type) {
-    case LITERAL_INT:
-      printf("Literal: %ld\n", node->literal.int_value);
-      break;
-    case LITERAL_FLOAT:
-      printf("Literal: %f\n", node->literal.float_value);
-      break;
-    default:
-      printf("Literal: <unknown type>\n");
-    }
-    break;
-  case EXPR_IDENTIFIER:
-    printf("Identifier: %s\n", node->identifier.name);
-    break;
-
-  case EXPR_UNARY:
-    printf("Unary Op: '%s'\n", unop_strings[node->expr_unary.op]);
-    print_ast_field("Operand:", arena, node->expr_unary.operand, indent + 1);
-    break;
-  case EXPR_BINARY:
-    printf("Binary Op: '%s'\n", binop_strings[node->expr_binary.op]);
-    print_ast_field("Left:", arena, node->expr_binary.left, indent + 1);
-    print_ast_field("Right:", arena, node->expr_binary.right, indent + 1);
-    break;
-
-  default:
-    printf("Unknown node type: %d\n", node->type);
-    break;
-  }
+  return token_strings[kind];
 }
 
 void debug_print_token(Token token) {
-  switch (token.type) {
+  switch (token.kind) {
   case TOKEN_ERROR:
     printf("Error: %.*s\n", (int)token.lexeme_len, token.lexeme);
     break;
   case TOKEN_INT:
   case TOKEN_FLOAT:
   case TOKEN_IDENT:
-    printf("Token: %s %.*s\n", lexer_render_token_type(token.type), (int)token.lexeme_len, token.lexeme);
+    printf("Token: %s %.*s\n", render_token_kind(token.kind), (int)token.lexeme_len, token.lexeme);
     break;
   default:
-    printf("Token: %s\n", lexer_render_token_type(token.type));
+    printf("Token: %s\n", render_token_kind(token.kind));
   }
-}
-
-void debug_print_ast_tree(Arena *arena, AstExpr *root) {
-  print_ast_node(arena, root, 0);
 }
 
 void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
   if (!node) {
-    printf("<null>\n");
+    printf("<null expr>\n");
     return;
   }
 
@@ -100,18 +45,23 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     switch (node->literal.type) {
     case LITERAL_INT:
       printf("%ld", node->literal.int_value);
-      break;
+      return;
     case LITERAL_FLOAT:
       printf("%f", node->literal.float_value);
-      break;
-    default:
-      printf("<unknown literal type>");
+      return;
+    case LITERAL_CHAR:
+      printf("'%c'", node->literal.char_value);
+      return;
+    case LITERAL_STRING:
+      printf("\"%s\"", node->literal.string_value);
+      return;
     }
-    break;
+    printf("<unknown literal type>");
+    return;
 
   case EXPR_IDENTIFIER:
     printf("%s", node->identifier.name);
-    break;
+    return;
 
   case EXPR_ASSIGN:
     printf("(= ");
@@ -119,13 +69,13 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     printf(" ");
     debug_print_ast_sexpr(arena, node->assignment.value);
     printf(")");
-    break;
+    return;
 
   case EXPR_UNARY:
     printf("(%s ", unop_strings[node->expr_unary.op]);
     debug_print_ast_sexpr(arena, node->expr_unary.operand);
     printf(")");
-    break;
+    return;
 
   case EXPR_BINARY:
     printf("(%s ", binop_strings[node->expr_binary.op]);
@@ -133,16 +83,19 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     printf(" ");
     debug_print_ast_sexpr(arena, node->expr_binary.right);
     printf(")");
-    break;
+    return;
 
-  default:
-    printf("<unknown expr node type>");
+  case EXPR_INVALID:
+    printf("<invalid expr node>");
+    return;
   }
+
+  printf("<unknown expr node type>");
 }
 
 void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
   if (!stmt) {
-    printf("<null>\n");
+    printf("<null stmt>\n");
     return;
   }
 
@@ -155,14 +108,14 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
       print_indent(2);
       debug_print_ast_stmt(arena, stmt->stmt_block.statements[i]);
     }
-    break;
+    return;
 
   case STMT_EXPRESSION:
     printf("Expression Statement:\n");
     print_indent(1);
     debug_print_ast_sexpr(arena, stmt->stmt_expr.expression);
     printf("\n");
-    break;
+    return;
 
   case STMT_VAR_DECL:
     printf("Variable Declaration: %s\n", stmt->stmt_var_decl.name);
@@ -176,7 +129,7 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
       debug_print_ast_sexpr(arena, stmt->stmt_var_decl.init);
       printf("\n");
     }
-    break;
+    return;
 
   case STMT_IF:
     printf("If Statement:\n");
@@ -192,23 +145,40 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
       printf("Else Branch:\n");
       debug_print_ast_stmt(arena, stmt->stmt_if.else_branch);
     }
-    break;
+    return;
 
-  default:
-    printf("<unknown statement type>\n");
+  case STMT_WHILE:
+    printf("While Statement:\n");
+    print_indent(1);
+    printf("Condition: ");
+    debug_print_ast_sexpr(arena, stmt->stmt_while.condition);
+    printf("\n");
+    print_indent(1);
+    printf("Body:\n");
+    debug_print_ast_stmt(arena, stmt->stmt_while.body);
+    return;
+
+  case STMT_INVALID:
+    printf("<invalid statement node>\n");
+    return;
   }
+
+  printf("<unknown statement type>\n");
 }
 
 void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
   if (!decl) {
-    printf("<null>\n");
+    printf("<null decl>\n");
     return;
   }
 
   switch (decl->type) {
-  default:
-    printf("<unknown declaration type>\n");
+  case DECL_INVALID:
+    printf("<invalid declaration node>\n");
+    return;
   }
+
+  printf("<unknown declaration type>\n");
 }
 
 void debug_print_ir_buffer(IrContext *ir_ctx) {
@@ -218,91 +188,98 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
     switch (inst->op) {
     case IR_INST_NONE:
       printf("%zu: <none>\n", i);
-      break;
+      continue;
 
     case IR_INST_LOAD_LITERAL:
       printf("%zu: r%u = %ld\n", i, inst->res.id, inst->literal);
-      break;
+      continue;
 
     case IR_INST_LOAD_VAR:
       printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var_name);
-      break;
+      continue;
     case IR_INST_STORE_VAR:
       printf("%zu: STORE_VAR %s = r%u\n", i, inst->var_name, inst->res.id);
-      break;
+      continue;
 
       // Unary operations
     case IR_INST_NEGATE:
       printf("%zu: r%u = -r%u\n", i, inst->res.id, inst->arg1.id);
-      break;
+      continue;
+    case IR_INST_NOT:
+      printf("%zu: r%u = !r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
 
       // Binary operations
     case IR_INST_ADD:
       printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_SUB:
       printf("%zu: r%u = r%u - r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_MUL:
       printf("%zu: r%u = r%u * r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_DIV:
       printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
 
     case IR_INST_CMP_EQ:
       printf("%zu: r%u = r%u == r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_CMP_NE:
       printf("%zu: r%u = r%u != r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_CMP_LT:
       printf("%zu: r%u = r%u < r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_CMP_GT:
       printf("%zu: r%u = r%u > r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_CMP_LE:
       printf("%zu: r%u = r%u <= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
     case IR_INST_CMP_GE:
       printf("%zu: r%u = r%u >= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
-      break;
+      continue;
 
     case IR_INST_LABEL:
       printf("%zu: @l%u:\n", i, inst->target.id);
-      break;
+      continue;
     case IR_INST_JUMP:
       printf("%zu: JUMP @l%u\n", i, inst->target.id);
-      break;
+      continue;
     case IR_INST_JZ:
       printf("%zu: JZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
-      break;
+      continue;
     case IR_INST_JNZ:
       printf("%zu: JNZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
-      break;
-
-    default:
-      printf("%zu: Unknown instruction\n", i);
-      break;
+      continue;
     }
+
+    printf("%zu: Unknown instruction\n", i);
   }
 }
 
-static const char *unop_strings[UNARYOP_COUNT] = {
-  [UNARYOP_NEGATE] = "-",
+static const char *token_strings[TOKEN_COUNT] = {
+#define TOKEN_NAME(token, name) [token] = name,
+  TOKEN_LIST(TOKEN_NAME)
+#undef TOKEN_NAME
 };
 
-static const char *binop_strings[BINARYOP_COUNT] = {
-  [BINARYOP_ADD] = "+",
-  [BINARYOP_SUB] = "-",
-  [BINARYOP_MUL] = "*",
-  [BINARYOP_DIV] = "/",
+static const char *unop_strings[UNOP_COUNT] = {
+  [UNOP_NEGATE] = "-",
+};
 
-  [BINARYOP_EQEQ] = "==",
-  [BINARYOP_NOT_EQ] = "!=",
-  [BINARYOP_LESS] = "<",
-  [BINARYOP_GREATER] = ">",
-  [BINARYOP_LESS_EQ] = "<=",
-  [BINARYOP_GREATER_EQ] = ">=",
+static const char *binop_strings[BINOP_COUNT] = {
+  [BINOP_ADD] = "+",
+  [BINOP_SUB] = "-",
+  [BINOP_MUL] = "*",
+  [BINOP_DIV] = "/",
+
+  [BINOP_EQEQ] = "==",
+  [BINOP_NOT_EQ] = "!=",
+  [BINOP_LESS] = "<",
+  [BINOP_GREATER] = ">",
+  [BINOP_LESS_EQ] = "<=",
+  [BINOP_GREATER_EQ] = ">=",
 };

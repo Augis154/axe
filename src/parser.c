@@ -26,11 +26,11 @@ typedef struct {
 
 static const ParseRule rules[TOKEN_COUNT];
 
-static const ParseRule *get_rule(TokenType type) {
-  if (type < 0 || type >= TOKEN_COUNT) {
+static const ParseRule *get_rule(TokenKind kind) {
+  if (kind < 0 || kind >= TOKEN_COUNT) {
     return NULL;
   }
-  return &rules[type];
+  return &rules[kind];
 }
 
 static void error_at(Parser *parser, Token token, const char *message) {
@@ -41,9 +41,9 @@ static void error_at(Parser *parser, Token token, const char *message) {
 
   fprintf(stderr, "[line %zu] Error", token.line);
 
-  if (token.type == TOKEN_EOF) {
+  if (token.kind == TOKEN_EOF) {
     fprintf(stderr, " at end");
-  } else if (token.type == TOKEN_ERROR) {
+  } else if (token.kind == TOKEN_ERROR) {
     // Nothing to print
   } else {
     fprintf(stderr, " at '%.*s'", (int)token.lexeme_len, token.lexeme);
@@ -60,7 +60,7 @@ static void advance(Parser *parser) {
   for (;;) {
     parser->next = lexer_get_token(&parser->lexer);
 
-    if (parser->next.type != TOKEN_ERROR) {
+    if (parser->next.kind != TOKEN_ERROR) {
       break;
     }
 
@@ -69,12 +69,12 @@ static void advance(Parser *parser) {
   }
 }
 
-static inline bool check(Parser *parser, TokenType type) {
-  return parser->next.type == type;
+static inline bool check(Parser *parser, TokenKind kind) {
+  return parser->next.kind == kind;
 }
 
-static bool match(Parser *parser, TokenType type) {
-  if (!check(parser, type)) {
+static bool match(Parser *parser, TokenKind kind) {
+  if (!check(parser, kind)) {
     return false;
   }
 
@@ -82,8 +82,8 @@ static bool match(Parser *parser, TokenType type) {
   return true;
 }
 
-static bool consume(Parser *parser, TokenType type, const char *message) {
-  if (match(parser, type)) {
+static bool consume(Parser *parser, TokenKind kind, const char *message) {
+  if (match(parser, kind)) {
     return true;
   }
 
@@ -92,7 +92,7 @@ static bool consume(Parser *parser, TokenType type, const char *message) {
 }
 
 static const char *parse_identifier_name(Parser *parser, Token token) {
-  if (token.type != TOKEN_IDENT) {
+  if (token.kind != TOKEN_IDENT) {
     error_at(parser, token, "Expected identifier.");
     return NULL;
   }
@@ -117,7 +117,7 @@ static inline bool is_lvalue(const AstExpr *node) {
 
 static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
   advance(parser);
-  ParsePrefixFn prefix_rule = get_rule(parser->current.type)->prefix;
+  ParsePrefixFn prefix_rule = get_rule(parser->current.kind)->prefix;
 
   if (!prefix_rule) {
     // Handle error: no prefix rule for this token
@@ -127,9 +127,9 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
 
   AstExpr *left = prefix_rule(parser);
 
-  while (precedence <= get_rule(parser->next.type)->precedence) {
+  while (precedence <= get_rule(parser->next.kind)->precedence) {
     advance(parser);
-    ParseInfixFn infix_rule = get_rule(parser->current.type)->infix;
+    ParseInfixFn infix_rule = get_rule(parser->current.kind)->infix;
 
     if (!infix_rule) {
       // Handle error: no infix rule for this token
@@ -142,41 +142,43 @@ static AstExpr *parse_precedence(Parser *parser, Precedence precedence) {
   return left;
 }
 
-static const UnaryOp get_unary_op(TokenType type) {
-  switch (type) {
+static const UnaryOp get_unary_op(TokenKind kind) {
+  switch (kind) {
   case TOKEN_MINUS:
-    return UNARYOP_NEGATE;
+    return UNOP_NEGATE;
+  case TOKEN_BANG:
+    return UNOP_NOT;
   default:
-    error_at(NULL, (Token){.type = type}, "Invalid unary operator.");
+    error_at(NULL, (Token){.kind = kind}, "Invalid unary operator.");
     return -1;
   }
 }
 
-static const BinaryOp get_binary_op(TokenType type) {
-  switch (type) {
+static const BinaryOp get_binary_op(TokenKind kind) {
+  switch (kind) {
   case TOKEN_PLUS:
-    return BINARYOP_ADD;
+    return BINOP_ADD;
   case TOKEN_MINUS:
-    return BINARYOP_SUB;
+    return BINOP_SUB;
   case TOKEN_STAR:
-    return BINARYOP_MUL;
+    return BINOP_MUL;
   case TOKEN_SLASH:
-    return BINARYOP_DIV;
+    return BINOP_DIV;
 
   case TOKEN_EQEQ:
-    return BINARYOP_EQEQ;
+    return BINOP_EQEQ;
   case TOKEN_NOT_EQ:
-    return BINARYOP_NOT_EQ;
+    return BINOP_NOT_EQ;
   case TOKEN_LESS:
-    return BINARYOP_LESS;
+    return BINOP_LESS;
   case TOKEN_GREATER:
-    return BINARYOP_GREATER;
+    return BINOP_GREATER;
   case TOKEN_LESS_EQ:
-    return BINARYOP_LESS_EQ;
+    return BINOP_LESS_EQ;
   case TOKEN_GREATER_EQ:
-    return BINARYOP_GREATER_EQ;
+    return BINOP_GREATER_EQ;
   default:
-    error_at(NULL, (Token){.type = type}, "Invalid binary operator.");
+    error_at(NULL, (Token){.kind = kind}, "Invalid binary operator.");
     return -1;
   }
 }
@@ -274,7 +276,7 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
 }
 
 static AstExpr *parse_unary(Parser *parser) {
-  TokenType operator = parser->current.type;
+  TokenKind operator = parser->current.kind;
   const ParseRule *rule = get_rule(operator);
 
   AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
@@ -287,7 +289,7 @@ static AstExpr *parse_unary(Parser *parser) {
 }
 
 static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
-  TokenType operator = parser->current.type;
+  TokenKind operator = parser->current.kind;
   const ParseRule *rule = get_rule(operator);
 
   AstExpr *right = parse_precedence(parser, rule->precedence + 1);
@@ -371,7 +373,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
   AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_VAR_DECL);
   stmt->stmt_var_decl.name = var_name;
-  stmt->stmt_var_decl.type_spec = type_spec;
+  stmt->stmt_var_decl.type = type_spec;
   stmt->stmt_var_decl.init = init_expr;
 
   return stmt;
@@ -459,7 +461,7 @@ AstExpr *parse_expression(Parser *parser) {
 }
 
 AstStmt *parse_statement(Parser *parser) {
-  switch (parser->next.type) {
+  switch (parser->next.kind) {
   case TOKEN_OBRACE:
     return parse_block(parser);
   case TOKEN_VAR:
@@ -483,7 +485,7 @@ AstDecl *parse_declaration(Parser *parser) {
 AstType *parse_type(Parser *parser) {
   Token token = parser->next;
 
-  switch (token.type) {
+  switch (token.kind) {
   case TOKEN_IDENT:
     return parse_named_type(parser);
   case TOKEN_STAR:
@@ -516,6 +518,7 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_GREATER_EQ] = {PREC_TERM, NULL, parse_binary},
 
   [TOKEN_EQUAL] = {PREC_ASSIGNMENT, NULL, parse_assignment},
+  [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
 
   [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
 };

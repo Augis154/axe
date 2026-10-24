@@ -16,6 +16,7 @@ typedef enum {
   IR_INST_STORE_VAR,
 
   IR_INST_NEGATE,
+  IR_INST_NOT,
 
   IR_INST_ADD,
   IR_INST_SUB,
