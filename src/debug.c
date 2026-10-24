@@ -166,10 +166,10 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
 
   case STMT_VAR_DECL:
     printf("Variable Declaration: %s\n", stmt->stmt_var_decl.name);
-    if (stmt->stmt_var_decl.type) {
-      print_indent(1);
-      printf("Type: %s\n", stmt->stmt_var_decl.type);
-    }
+    // if (stmt->stmt_var_decl.type) {
+    //   print_indent(1);
+    //   printf("Type: %s\n", stmt->stmt_var_decl.type);
+    // }
     if (stmt->stmt_var_decl.init) {
       print_indent(1);
       printf("Init: ");

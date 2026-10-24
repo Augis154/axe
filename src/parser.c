@@ -223,7 +223,7 @@ static AstExpr *parse_int_literal(Parser *parser) {
     value = value * base + digit;
   }
 
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_LITERAL);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_LITERAL);
   expr->literal.type = LITERAL_INT;
   expr->literal.int_value = value;
 
@@ -231,7 +231,7 @@ static AstExpr *parse_int_literal(Parser *parser) {
 }
 
 static AstExpr *parse_float_literal(Parser *parser) {
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_LITERAL);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_LITERAL);
   expr->literal.type = LITERAL_FLOAT;
   expr->literal.float_value = strtod(parser->current.lexeme, NULL);
 
@@ -244,7 +244,7 @@ static AstExpr *parse_identifier(Parser *parser) {
     return NULL;
   }
 
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_IDENTIFIER);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_IDENTIFIER);
   expr->identifier.name = identifier_name;
 
   return expr;
@@ -266,7 +266,7 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
 
   AstExpr *right = parse_precedence(parser, PREC_ASSIGNMENT);
 
-  AstExpr *assign_expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_ASSIGN);
+  AstExpr *assign_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_ASSIGN);
   assign_expr->assignment.target = left;
   assign_expr->assignment.value = right;
 
@@ -279,7 +279,7 @@ static AstExpr *parse_unary(Parser *parser) {
 
   AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
 
-  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_UNARY);
+  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_UNARY);
   unary_expr->expr_unary.op = get_unary_op(operator);
   unary_expr->expr_unary.operand = op_expr;
 
@@ -292,7 +292,7 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 
   AstExpr *right = parse_precedence(parser, rule->precedence + 1);
 
-  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->ast_arena, EXPR_BINARY);
+  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_BINARY);
   binary_expr->expr_binary.op = get_binary_op(operator);
   binary_expr->expr_binary.left = left;
   binary_expr->expr_binary.right = right;
@@ -316,11 +316,11 @@ static AstStmt *parse_block(Parser *parser) {
 
   consume(parser, TOKEN_CBRACE, "Expected '}' to end block.");
 
-  AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_BLOCK);
+  AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BLOCK);
   AstStmtBlock *block = &block_stmt->stmt_block;
 
   block->count = da_len(stmts);
-  block->statements = arena_alloc(&parser->comp_unit->ast_arena, sizeof(AstStmt *) * block->count);
+  block->statements = arena_alloc(&parser->comp_unit->arena, sizeof(AstStmt *) * block->count);
   memcpy(block->statements, stmts, sizeof(AstStmt *) * block->count);
   da_free(stmts);
 
@@ -332,7 +332,7 @@ static AstStmt *parse_expression_statement(Parser *parser) {
 
   consume(parser, TOKEN_SEMICOLON, "Expected ';' after expression");
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_EXPRESSION);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_EXPRESSION);
   stmt->stmt_expr.expression = expr;
 
   return stmt;
@@ -344,12 +344,12 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
   Token name_token = parser->current;
 
-  const char *type_name = NULL;
+  AstType *type_spec = NULL;
   if (match(parser, TOKEN_COLON)) {
-    consume(parser, TOKEN_IDENT, "Expected type name after ':'.");
-
-    // TODO: Properly parse type names
-    type_name = parse_identifier_name(parser, parser->current);
+    type_spec = parse_type(parser);
+    if (!type_spec) {
+      error_at(parser, parser->current, "Expected type after ':' in variable declaration.");
+    }
   }
 
   AstExpr *init_expr = NULL;
@@ -359,7 +359,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
   consume(parser, TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
 
-  if (!type_name && !init_expr) {
+  if (!type_spec && !init_expr) {
     error_at(parser, name_token, "Variable declaration must have either a type annotation or an initializer.");
     return NULL;
   }
@@ -369,9 +369,9 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
     return NULL;
   }
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_VAR_DECL);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_VAR_DECL);
   stmt->stmt_var_decl.name = var_name;
-  stmt->stmt_var_decl.type = type_name;
+  stmt->stmt_var_decl.type_spec = type_spec;
   stmt->stmt_var_decl.init = init_expr;
 
   return stmt;
@@ -389,7 +389,7 @@ static AstStmt *parse_if_statement(Parser *parser) {
     else_branch = parse_statement(parser);
   }
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_IF);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_IF);
   stmt->stmt_if.condition = condition;
   stmt->stmt_if.then_branch = then_branch;
   stmt->stmt_if.else_branch = else_branch;
@@ -404,7 +404,7 @@ static AstStmt *parse_while_statement(Parser *parser) {
 
   AstStmt *body = parse_block(parser);
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->ast_arena, STMT_WHILE);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_WHILE);
   stmt->stmt_while.condition = condition;
   stmt->stmt_while.body = body;
 
@@ -412,6 +412,36 @@ static AstStmt *parse_while_statement(Parser *parser) {
 }
 
 // Declaration parsing functions
+
+// Type parsing functions
+
+static AstType *parse_named_type(Parser *parser) {
+  consume(parser, TOKEN_IDENT, "Expected type name for named type.");
+
+  const char *type_name = parse_identifier_name(parser, parser->current);
+  if (!type_name) {
+    return NULL;
+  }
+
+  AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_NAMED);
+  type->named = type_name;
+
+  return type;
+}
+
+static AstType *parse_pointer_type(Parser *parser) {
+  consume(parser, TOKEN_STAR, "Expected '*' for pointer type.");
+
+  AstType *base_type = parse_type(parser);
+  if (!base_type) {
+    return NULL;
+  }
+
+  AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_POINTER);
+  type->pointer.base = base_type;
+
+  return type;
+}
 
 // Parser public functions
 
@@ -447,6 +477,22 @@ AstStmt *parse_statement(Parser *parser) {
 
 AstDecl *parse_declaration(Parser *parser) {
   // TODO
+  return NULL;
+}
+
+AstType *parse_type(Parser *parser) {
+  Token token = parser->next;
+
+  switch (token.type) {
+  case TOKEN_IDENT:
+    return parse_named_type(parser);
+  case TOKEN_STAR:
+    return parse_pointer_type(parser);
+
+  default:
+    return NULL;
+  }
+
   return NULL;
 }
 

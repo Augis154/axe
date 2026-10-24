@@ -25,7 +25,7 @@ void cu_free(CompilationUnit *comp_unit) {
   st_free(&comp_unit->intern_table);
   st_free(&comp_unit->symbol_table);
 
-  arena_free(&comp_unit->ast_arena);
+  arena_free(&comp_unit->arena);
 }
 
 void cu_read_source_file(CompilationUnit *comp_unit, const char *filename) {

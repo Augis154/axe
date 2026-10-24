@@ -9,6 +9,7 @@
 typedef struct AstExpr_ AstExpr;
 typedef struct AstStmt_ AstStmt;
 typedef struct AstDecl_ AstDecl;
+typedef struct AstType_ AstType;
 
 typedef enum {
   UNARYOP_NEGATE,
@@ -44,7 +45,7 @@ typedef enum {
 
   EXPR_UNARY,
   EXPR_BINARY,
-} AstExprType;
+} AstExprKind;
 
 typedef enum {
   LITERAL_INT,
@@ -84,7 +85,7 @@ typedef struct {
 } AstExprBinary;
 
 struct AstExpr_ {
-  AstExprType type;
+  AstExprKind type;
   uint32_t id;
 
   union {
@@ -109,7 +110,7 @@ typedef enum {
 
   STMT_IF,
   STMT_WHILE,
-} AstStmtType;
+} AstStmtKind;
 
 typedef struct {
   AstStmt **statements;
@@ -122,7 +123,7 @@ typedef struct {
 
 typedef struct {
   const char *name;
-  const char *type;
+  AstType *type_spec;
   AstExpr *init;
 } AstStmtVarDecl;
 
@@ -138,7 +139,7 @@ typedef struct {
 } AstWhileStmt;
 
 struct AstStmt_ {
-  AstStmtType type;
+  AstStmtKind type;
   uint32_t id;
 
   union {
@@ -155,7 +156,7 @@ struct AstStmt_ {
 
 typedef enum {
   DECL_INVALID,
-} AstDeclType;
+} AstDeclKind;
 
 typedef struct {
   char *name;
@@ -163,7 +164,7 @@ typedef struct {
 } AstDeclVar;
 
 struct AstDecl_ {
-  AstDeclType type;
+  AstDeclKind type;
   uint32_t id;
 
   union {
@@ -171,10 +172,32 @@ struct AstDecl_ {
   };
 };
 
+// Type nodes
+
+typedef enum {
+  TYPE_NAMED,
+  TYPE_POINTER,
+} AstTypeKind;
+
+typedef struct {
+  AstType *base;
+} AstTypePointer;
+
+struct AstType_ {
+  AstTypeKind kind;
+  uint32_t id;
+
+  union {
+    const char *named;
+    AstTypePointer pointer;
+  };
+};
+
 void ast_arena_free(Arena *arena);
 
-AstExpr *ast_expr_new(Arena *arena, AstExprType type);
-AstStmt *ast_stmt_new(Arena *arena, AstStmtType type);
-AstDecl *ast_decl_new(Arena *arena, AstDeclType type);
+AstExpr *ast_expr_new(Arena *arena, AstExprKind type);
+AstStmt *ast_stmt_new(Arena *arena, AstStmtKind type);
+AstDecl *ast_decl_new(Arena *arena, AstDeclKind type);
+AstType *ast_type_new(Arena *arena, AstTypeKind kind);
 
 #endif // AST_H
