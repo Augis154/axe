@@ -46,7 +46,8 @@
 #define TOKENS_KEYWORDS(X) \
   X(TOKEN_VAR, "var")      \
   X(TOKEN_IF, "if")        \
-  X(TOKEN_ELSE, "else")
+  X(TOKEN_ELSE, "else")    \
+  X(TOKEN_WHILE, "while")
 
 #define TOKEN_LIST(X) \
   TOKENS_SPECIAL(X)   \

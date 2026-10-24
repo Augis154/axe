@@ -106,7 +106,9 @@ typedef enum {
   STMT_BLOCK,
   STMT_EXPRESSION,
   STMT_VAR_DECL,
+
   STMT_IF,
+  STMT_WHILE,
 } AstStmtType;
 
 typedef struct {
@@ -130,6 +132,11 @@ typedef struct {
   AstStmt *else_branch;
 } AstIfStmt;
 
+typedef struct {
+  AstExpr *condition;
+  AstStmt *body;
+} AstWhileStmt;
+
 struct AstStmt_ {
   AstStmtType type;
   uint32_t id;
@@ -138,7 +145,9 @@ struct AstStmt_ {
     AstStmtBlock stmt_block;
     AstStmtExpr stmt_expr;
     AstStmtVarDecl stmt_var_decl;
+
     AstIfStmt stmt_if;
+    AstWhileStmt stmt_while;
   };
 };
 
