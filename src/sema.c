@@ -278,6 +278,18 @@ static void sema_stmt_var_decl(SemaContext *ctx, AstStmt *stmt) {
   }
 }
 
+static void sema_stmt_break(SemaContext *ctx, AstStmt *stmt) {
+  if (ctx->loop_depth == 0) {
+    sema_error(ctx, stmt->loc, "'break' statement not within a loop");
+  }
+}
+
+static void sema_stmt_continue(SemaContext *ctx, AstStmt *stmt) {
+  if (ctx->loop_depth == 0) {
+    sema_error(ctx, stmt->loc, "'continue' statement not within a loop");
+  }
+}
+
 static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_if.condition);
   if (cond_type != TYPE_bool) {
@@ -296,7 +308,9 @@ static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
     sema_error(ctx, stmt->stmt_while.condition->loc, "Condition in 'while' must be of type 'bool'");
   }
 
+  ctx->loop_depth++;
   sema_stmt(ctx, stmt->stmt_while.body);
+  ctx->loop_depth--;
 }
 
 // Type semantic analysis functions
@@ -328,6 +342,7 @@ void sema_init(SemaContext *ctx, CompilationUnit *comp_unit) {
   ctx->comp_unit = comp_unit;
   ctx->current_scope = scope_enter(ctx, NULL);
   ctx->next_symbol_id = 1;
+  ctx->loop_depth = 0;
 
   uint32_t expr_count = ast_expr_count();
   ctx->expr_types = arena_alloc(&comp_unit->arena, sizeof(Type *) * expr_count);
@@ -382,25 +397,24 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
   switch (stmt->kind) {
   case STMT_BLOCK:
-    sema_stmt_block(ctx, stmt);
-    return;
+    return sema_stmt_block(ctx, stmt);
   case STMT_EXPRESSION:
-    sema_stmt_expression(ctx, stmt);
-    return;
+    return sema_stmt_expression(ctx, stmt);
   case STMT_VAR_DECL:
-    sema_stmt_var_decl(ctx, stmt);
-    return;
+    return sema_stmt_var_decl(ctx, stmt);
+
+  case STMT_BREAK:
+    return sema_stmt_break(ctx, stmt);
+  case STMT_CONTINUE:
+    return sema_stmt_continue(ctx, stmt);
 
   case STMT_IF:
-    sema_stmt_if(ctx, stmt);
-    return;
+    return sema_stmt_if(ctx, stmt);
   case STMT_WHILE:
-    sema_stmt_while(ctx, stmt);
-    return;
+    return sema_stmt_while(ctx, stmt);
 
   case STMT_INVALID:
-    sema_error(ctx, stmt->loc, "Invalid statement");
-    return;
+    return sema_error(ctx, stmt->loc, "Invalid statement");
   }
 
   sema_error(ctx, stmt->loc, "Unknown statement type");

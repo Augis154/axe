@@ -43,11 +43,13 @@
   X(TOKEN_CHAR, "Char")        \
   X(TOKEN_STRING, "String")
 
-#define TOKENS_KEYWORDS(X) \
-  X(TOKEN_VAR, "var")      \
-  X(TOKEN_IF, "if")        \
-  X(TOKEN_ELSE, "else")    \
-  X(TOKEN_WHILE, "while")
+#define TOKENS_KEYWORDS(X)      \
+  X(TOKEN_VAR, "var")           \
+  X(TOKEN_IF, "if")             \
+  X(TOKEN_ELSE, "else")         \
+  X(TOKEN_WHILE, "while")       \
+  X(TOKEN_BREAK, "break")       \
+  X(TOKEN_CONTINUE, "continue")
 
 #define TOKEN_LIST(X) \
   TOKENS_SPECIAL(X)   \

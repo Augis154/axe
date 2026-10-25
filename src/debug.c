@@ -131,6 +131,14 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
     }
     return;
 
+  case STMT_BREAK:
+    printf("Break Statement\n");
+    return;
+
+  case STMT_CONTINUE:
+    printf("Continue Statement\n");
+    return;
+
   case STMT_IF:
     printf("If Statement:\n");
     print_indent(1);

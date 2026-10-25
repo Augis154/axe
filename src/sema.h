@@ -37,6 +37,7 @@ typedef struct {
 
   Scope *current_scope;
   uint32_t next_symbol_id;
+  uint32_t loop_depth;
 
   Type **type_intern_table;
   Type **expr_types;
