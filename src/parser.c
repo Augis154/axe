@@ -265,6 +265,23 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
   return assign_expr;
 }
 
+static AstExpr *parse_call(Parser *parser, AstExpr *left) {
+  size_t arg_count = 0;
+
+  if (check(parser, TOKEN_OPAREN)) {
+    // TODO: Parse arguments for the function call
+  }
+
+  consume(parser, TOKEN_CPAREN, "Expected ')' after function call");
+
+  AstExpr *call_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_CALL, left->loc);
+  call_expr->expr_call.callee = left;
+  call_expr->expr_call.arguments = NULL;
+  call_expr->expr_call.argument_count = arg_count;
+
+  return call_expr;
+}
+
 static AstExpr *parse_unary(Parser *parser) {
   SourceLoc start_loc = parser->current.loc;
   TokenKind operator = parser->current.kind;
@@ -312,11 +329,12 @@ static AstStmt *parse_block(Parser *parser) {
   consume(parser, TOKEN_CBRACE, "Expected '}' to end block.");
 
   AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BLOCK, block_start);
-  AstStmtBlock *block = &block_stmt->stmt_block;
 
-  block->count = da_len(stmts);
-  block->statements = arena_alloc(&parser->comp_unit->arena, sizeof(AstStmt *) * block->count);
-  memcpy(block->statements, stmts, sizeof(AstStmt *) * block->count);
+  AstStmt **block_stmts = arena_alloc(&parser->comp_unit->arena, sizeof(AstStmt *) * da_len(stmts));
+  memcpy(block_stmts, stmts, sizeof(AstStmt *) * da_len(stmts));
+
+  block_stmt->stmt_block.statements = block_stmts;
+  block_stmt->stmt_block.count = da_len(stmts);
   da_free(stmts);
 
   return block_stmt;
@@ -368,6 +386,24 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
   stmt->stmt_var_decl.name = var_name;
   stmt->stmt_var_decl.type = type_spec;
   stmt->stmt_var_decl.init = init_expr;
+
+  return stmt;
+}
+
+static AstStmt *parse_return_statement(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
+  consume(parser, TOKEN_RETURN, "Expected 'return' keyword for return statement.");
+
+  AstExpr *return_expr = NULL;
+  if (!check(parser, TOKEN_SEMICOLON)) {
+    return_expr = parse_expression(parser);
+  }
+
+  consume(parser, TOKEN_SEMICOLON, "Expected ';' after return statement.");
+
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_RETURN, start_loc);
+  stmt->stmt_return.value = return_expr;
 
   return stmt;
 }
@@ -440,6 +476,40 @@ static AstStmt *parse_while_statement(Parser *parser) {
 
 // Declaration parsing functions
 
+static AstDecl *parse_function_declaration(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
+  consume(parser, TOKEN_FN, "Expected 'fn' keyword for function declaration.");
+  consume(parser, TOKEN_IDENT, "Expected function name after 'fn'.");
+
+  const char *func_name = parse_identifier_name(parser, parser->current);
+  if (!func_name) return NULL;
+
+  consume(parser, TOKEN_OPAREN, "Expected '(' after function name.");
+  // TODO: Parse function parameters
+  consume(parser, TOKEN_CPAREN, "Expected ')' after function parameters.");
+
+  AstType *return_type = NULL;
+  if (match(parser, TOKEN_COLON)) {
+    return_type = parse_type(parser);
+    if (!return_type) {
+      error_at(parser, parser->current, "Expected return type after ':' in function declaration.");
+    }
+  }
+
+  AstStmt *func_body = parse_block(parser);
+  if (!func_body) return NULL;
+
+  AstDecl *decl = ast_decl_new(&parser->comp_unit->arena, DECL_FUNCTION, start_loc);
+  decl->decl_function.name = func_name;
+  decl->decl_function.body = func_body;
+  decl->decl_function.return_type = return_type;
+  // decl->decl_function.param_types = NULL; // TODO: Set parameter types
+  // decl->decl_function.param_count = 0;    // TODO: Set parameter count
+
+  return decl;
+}
+
 // Type parsing functions
 
 static AstType *parse_named_type(Parser *parser) {
@@ -491,7 +561,10 @@ AstStmt *parse_statement(Parser *parser) {
     return parse_block(parser);
   case TOKEN_VAR:
     return parse_variable_declaration(parser);
+  case TOKEN_FN:
 
+  case TOKEN_RETURN:
+    return parse_return_statement(parser);
   case TOKEN_BREAK:
     return parse_break_statement(parser);
   case TOKEN_CONTINUE:
@@ -508,7 +581,14 @@ AstStmt *parse_statement(Parser *parser) {
 }
 
 AstDecl *parse_declaration(Parser *parser) {
-  // TODO
+  switch (parser->next.kind) {
+  case TOKEN_FN:
+    return parse_function_declaration(parser);
+
+  default:
+    error_at(parser, parser->next, "Expected declaration.");
+  }
+
   return NULL;
 }
 
@@ -526,6 +606,29 @@ AstType *parse_type(Parser *parser) {
   }
 
   return NULL;
+}
+
+AstProgram *parse_program(Parser *parser) {
+  AstDecl **decls = NULL;
+
+  while (!check(parser, TOKEN_EOF)) {
+    AstDecl *decl = parse_declaration(parser);
+    if (decl) {
+      da_append(decls, decl);
+    }
+  }
+
+  AstProgram *program = arena_alloc(&parser->comp_unit->arena, sizeof(AstProgram));
+
+  AstDecl **prog_decls = arena_alloc(&parser->comp_unit->arena, sizeof(AstDecl *) * da_len(decls));
+  memcpy(prog_decls, decls, sizeof(AstDecl *) * da_len(decls));
+
+  program->decls = prog_decls;
+  program->decl_count = da_len(decls);
+
+  da_free(decls);
+
+  return program;
 }
 
 // Parse rules and operator mappings
@@ -550,5 +653,5 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_EQUAL] = {PREC_ASSIGNMENT, NULL, parse_assignment},
   [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
 
-  [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, NULL},
+  [TOKEN_OPAREN] = {PREC_CALL, parse_grouping, parse_call},
 };

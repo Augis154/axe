@@ -135,6 +135,29 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   return target_type;
 }
 
+static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
+  AstExpr *callee = expr->expr_call.callee;
+
+  if (callee->kind != EXPR_IDENTIFIER) {
+    sema_error(ctx, expr->loc, "Function calls must be made to identifiers");
+    return TYPE_error;
+  }
+
+  Symbol *sym = scope_lookup(ctx->current_scope, callee->identifier.name);
+
+  if (!sym) {
+    sema_error(ctx, expr->loc, "Undefined function '%s'", callee->identifier.name);
+    return TYPE_error;
+  }
+
+  if (sym->kind != SYMBOL_FUNCTION) {
+    sema_error(ctx, expr->loc, "Expected function, got %s", callee->identifier.name);
+    return TYPE_error;
+  }
+
+  return sym->type;
+}
+
 static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
   Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
 
@@ -278,6 +301,29 @@ static void sema_stmt_var_decl(SemaContext *ctx, AstStmt *stmt) {
   }
 }
 
+static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
+  if (!ctx->current_function) {
+    sema_error(ctx, stmt->loc, "Cannot 'return' outside of a function");
+    return;
+  }
+
+  Type *expected_type = ctx->current_function->symbol->type;
+  Type *actual_type = TYPE_void;
+
+  if (stmt->stmt_return.value) {
+    actual_type = sema_expr(ctx, stmt->stmt_return.value);
+  }
+
+  if (!type_equals(expected_type, actual_type)) {
+    sema_error(ctx,
+               stmt->loc,
+               "Type mismatch: function '%s' expects return type '%s', but got '%s'",
+               ctx->current_function->name,
+               expected_type->name,
+               actual_type->name);
+  }
+}
+
 static void sema_stmt_break(SemaContext *ctx, AstStmt *stmt) {
   if (ctx->loop_depth == 0) {
     sema_error(ctx, stmt->loc, "'break' statement not within a loop");
@@ -311,6 +357,35 @@ static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
   ctx->loop_depth++;
   sema_stmt(ctx, stmt->stmt_while.body);
   ctx->loop_depth--;
+}
+
+// Declaration semantic analysis functions
+
+static void sema_decl_function(SemaContext *ctx, AstDecl *decl) {
+  Type *return_type = sema_type(ctx, decl->decl_function.return_type);
+  if (return_type == TYPE_error) {
+    sema_error(ctx, decl->loc, "Invalid return type for function '%s'", decl->decl_function.name);
+    return;
+  }
+
+  Symbol *sym = scope_insert(ctx, decl->decl_function.name, SYMBOL_FUNCTION, return_type, decl->loc);
+  if (!sym) {
+    sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", decl->decl_function.name);
+    return;
+  }
+
+  AstDeclFunction *prev_func = ctx->current_function;
+  ctx->current_function = &decl->decl_function;
+  ctx->current_function->symbol = sym;
+
+  ctx->current_scope = scope_enter(ctx, ctx->current_scope);
+
+  // TODO: Handle function parameters and their types
+
+  sema_stmt(ctx, decl->decl_function.body);
+
+  ctx->current_scope = scope_exit(ctx->current_scope);
+  ctx->current_function = prev_func;
 }
 
 // Type semantic analysis functions
@@ -372,6 +447,9 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
   case EXPR_ASSIGN:
     result_type = sema_expr_assignment(ctx, expr);
     break;
+  case EXPR_CALL:
+    result_type = sema_expr_call(ctx, expr);
+    break;
 
   case EXPR_UNARY:
     result_type = sema_expr_unary(ctx, expr);
@@ -403,6 +481,8 @@ void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
   case STMT_VAR_DECL:
     return sema_stmt_var_decl(ctx, stmt);
 
+  case STMT_RETURN:
+    return sema_stmt_return(ctx, stmt);
   case STMT_BREAK:
     return sema_stmt_break(ctx, stmt);
   case STMT_CONTINUE:
@@ -420,6 +500,19 @@ void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
   sema_error(ctx, stmt->loc, "Unknown statement type");
 }
 
+void sema_decl(SemaContext *ctx, AstDecl *decl) {
+  switch (decl->kind) {
+  case DECL_FUNCTION: {
+    return sema_decl_function(ctx, decl);
+  }
+
+  case DECL_INVALID:
+    return sema_error(ctx, decl->loc, "Invalid declaration");
+  }
+
+  sema_error(ctx, decl->loc, "Unknown declaration type");
+}
+
 Type *sema_type(SemaContext *ctx, AstType *type) {
   if (!type) {
     return TYPE_void;
@@ -434,4 +527,10 @@ Type *sema_type(SemaContext *ctx, AstType *type) {
 
   sema_error(ctx, type->loc, "Unknown type kind");
   return TYPE_error;
+}
+
+void sema_program(SemaContext *ctx, AstProgram *program) {
+  for (size_t i = 0; i < program->decl_count; i++) {
+    sema_decl(ctx, program->decls[i]);
+  }
 }

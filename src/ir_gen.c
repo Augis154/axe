@@ -26,7 +26,8 @@ static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
     return;
   }
 
-  da_append(ctx->buffer, instr);
+  IrFunction *current_function = &ctx->module->functions[ctx->current_func_idx];
+  da_append(current_function->buffer, instr);
 
   if (instr.op == IR_INST_JUMP) {
     ctx->block_terminated = true;
@@ -35,7 +36,7 @@ static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
 
 // Expression handling
 
-static IrReg handle_expression(IrContext *ctx, AstExpr *node);
+static IrReg emit_expression(IrContext *ctx, AstExpr *node);
 
 static IrOp get_unary_ir_op(UnaryOp op) {
   switch (op) {
@@ -86,8 +87,8 @@ static IrOp get_binary_ir_op(BinaryOp op) {
   exit(EXIT_FAILURE);
 }
 
-static IrReg handle_literal(IrContext *ctx, AstExpr *node) {
-  assert(node && "handle_literal: node is NULL");
+static IrReg emit_literal(IrContext *ctx, AstExpr *node) {
+  assert(node && "emit_literal: node is NULL");
 
   AstLiteral *literal = &node->literal;
 
@@ -95,13 +96,13 @@ static IrReg handle_literal(IrContext *ctx, AstExpr *node) {
   case LITERAL_INT:
     break;
   case LITERAL_FLOAT:
-    fprintf(stderr, "handle_literal: float literals not yet supported in IR generation\n");
+    fprintf(stderr, "emit_literal: float literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
   case LITERAL_CHAR:
-    fprintf(stderr, "handle_literal: char literals not yet supported in IR generation\n");
+    fprintf(stderr, "emit_literal: char literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
   case LITERAL_STRING:
-    fprintf(stderr, "handle_literal: string literals not yet supported in IR generation\n");
+    fprintf(stderr, "emit_literal: string literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
   }
 
@@ -117,8 +118,8 @@ static IrReg handle_literal(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg handle_identifier(IrContext *ctx, AstExpr *node) {
-  assert(node && "handle_identifier: node is NULL");
+static IrReg emit_identifier(IrContext *ctx, AstExpr *node) {
+  assert(node && "emit_identifier: node is NULL");
 
   IrReg res = next_reg(ctx);
 
@@ -132,10 +133,10 @@ static IrReg handle_identifier(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg handle_assignment(IrContext *ctx, AstExpr *node) {
-  assert(node && "handle_assignment: node is NULL");
+static IrReg emit_assignment(IrContext *ctx, AstExpr *node) {
+  assert(node && "emit_assignment: node is NULL");
 
-  IrReg value = handle_expression(ctx, node->assignment.value);
+  IrReg value = emit_expression(ctx, node->assignment.value);
 
   IrInstr inst = {
     .op = IR_INST_STORE_VAR,
@@ -147,10 +148,25 @@ static IrReg handle_assignment(IrContext *ctx, AstExpr *node) {
   return value;
 }
 
-static IrReg handle_unary_op(IrContext *ctx, AstExpr *node) {
-  assert(node && "handle_unary_op: node is NULL");
+static IrReg emit_call(IrContext *ctx, AstExpr *node) {
+  assert(node && "emit_call: node is NULL");
 
-  IrReg operand = handle_expression(ctx, node->expr_unary.operand);
+  IrReg res = next_reg(ctx);
+
+  IrInstr inst = {
+    .op = IR_INST_CALL,
+    .res = res,
+    .var_name = node->expr_call.callee->identifier.name,
+  };
+  emit_ir_instr(ctx, inst);
+
+  return res;
+}
+
+static IrReg emit_unary_op(IrContext *ctx, AstExpr *node) {
+  assert(node && "emit_unary_op: node is NULL");
+
+  IrReg operand = emit_expression(ctx, node->expr_unary.operand);
 
   IrReg res = next_reg(ctx);
 
@@ -164,11 +180,11 @@ static IrReg handle_unary_op(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg handle_binary_op(IrContext *ctx, AstExpr *node) {
-  assert(node && "handle_binary_op: node is NULL");
+static IrReg emit_binary_op(IrContext *ctx, AstExpr *node) {
+  assert(node && "emit_binary_op: node is NULL");
 
-  IrReg left = handle_expression(ctx, node->expr_binary.left);
-  IrReg right = handle_expression(ctx, node->expr_binary.right);
+  IrReg left = emit_expression(ctx, node->expr_binary.left);
+  IrReg right = emit_expression(ctx, node->expr_binary.right);
 
   IrReg res = next_reg(ctx);
 
@@ -183,58 +199,60 @@ static IrReg handle_binary_op(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg handle_expression(IrContext *ctx, AstExpr *node) {
+static IrReg emit_expression(IrContext *ctx, AstExpr *node) {
   if (!node) {
     return NULL_REG;
   }
 
   switch (node->kind) {
   case EXPR_LITERAL:
-    return handle_literal(ctx, node);
+    return emit_literal(ctx, node);
 
   case EXPR_IDENTIFIER:
-    return handle_identifier(ctx, node);
+    return emit_identifier(ctx, node);
 
   case EXPR_ASSIGN:
-    return handle_assignment(ctx, node);
+    return emit_assignment(ctx, node);
+  case EXPR_CALL:
+    return emit_call(ctx, node);
 
   case EXPR_UNARY:
-    return handle_unary_op(ctx, node);
+    return emit_unary_op(ctx, node);
   case EXPR_BINARY:
-    return handle_binary_op(ctx, node);
+    return emit_binary_op(ctx, node);
 
   case EXPR_INVALID:
-    fprintf(stderr, "ir_handle_expression: encountered EXPR_INVALID node\n");
+    fprintf(stderr, "ir_emit_expression: encountered EXPR_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
-  fprintf(stderr, "ir_handle_expression: unhandled AST node kind %d\n", node->kind);
+  fprintf(stderr, "ir_emit_expression: unhandled AST node kind %d\n", node->kind);
   exit(EXIT_FAILURE);
 }
 
 // Statement handling
 
-static void handle_statement(IrContext *ctx, AstStmt *stmt);
+static void emit_statement(IrContext *ctx, AstStmt *stmt);
 
-static void handle_stmt_block(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "handle_stmt_block: stmt is NULL");
+static void emit_stmt_block(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_block: stmt is NULL");
 
   for (size_t i = 0; i < stmt->stmt_block.count; i++) {
     AstStmt *inner_stmt = stmt->stmt_block.statements[i];
-    handle_statement(ctx, inner_stmt);
+    emit_statement(ctx, inner_stmt);
   }
 }
 
-static void handle_stmt_expression(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "handle_stmt_expression: stmt is NULL");
+static void emit_stmt_expression(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_expression: stmt is NULL");
 
-  handle_expression(ctx, stmt->stmt_expr.expression);
+  emit_expression(ctx, stmt->stmt_expr.expression);
 }
 
-static void handle_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "handle_stmt_var_decl: stmt is NULL");
+static void emit_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_var_decl: stmt is NULL");
 
-  IrReg init_reg = handle_expression(ctx, stmt->stmt_var_decl.init);
+  IrReg init_reg = emit_expression(ctx, stmt->stmt_var_decl.init);
 
   if (init_reg.id == NULL_REG.id) {
     init_reg = next_reg(ctx);
@@ -254,7 +272,19 @@ static void handle_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
   emit_ir_instr(ctx, inst);
 }
 
-static void handle_stmt_break(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_return(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_return: stmt is NULL");
+
+  IrReg value = emit_expression(ctx, stmt->stmt_return.value);
+
+  IrInstr inst = {
+    .op = IR_INST_RETURN,
+    .arg1 = value,
+  };
+  emit_ir_instr(ctx, inst);
+}
+
+static void emit_stmt_break(IrContext *ctx, AstStmt *stmt) {
   assert(ctx->current_loop && "Break statement not within a loop");
 
   IrInstr inst = {
@@ -264,7 +294,7 @@ static void handle_stmt_break(IrContext *ctx, AstStmt *stmt) {
   emit_ir_instr(ctx, inst);
 }
 
-static void handle_stmt_continue(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_continue(IrContext *ctx, AstStmt *stmt) {
   assert(ctx->current_loop && "Continue statement not within a loop");
 
   IrInstr inst = {
@@ -274,13 +304,13 @@ static void handle_stmt_continue(IrContext *ctx, AstStmt *stmt) {
   emit_ir_instr(ctx, inst);
 }
 
-static void handle_stmt_if(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "handle_stmt_if: stmt is NULL");
+static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_if: stmt is NULL");
 
   IrLabel else_label = next_label(ctx);
   IrLabel end_label = next_label(ctx);
 
-  IrReg cond_reg = handle_expression(ctx, stmt->stmt_if.condition);
+  IrReg cond_reg = emit_expression(ctx, stmt->stmt_if.condition);
 
   IrInstr cond_jump_instr = {
     .op = IR_INST_JZ,
@@ -289,7 +319,7 @@ static void handle_stmt_if(IrContext *ctx, AstStmt *stmt) {
   };
   emit_ir_instr(ctx, cond_jump_instr);
 
-  handle_statement(ctx, stmt->stmt_if.then_branch);
+  emit_statement(ctx, stmt->stmt_if.then_branch);
 
   IrInstr jump_to_end_instr = {
     .op = IR_INST_JUMP,
@@ -304,7 +334,7 @@ static void handle_stmt_if(IrContext *ctx, AstStmt *stmt) {
   emit_ir_instr(ctx, else_label_instr);
 
   if (stmt->stmt_if.else_branch) {
-    handle_statement(ctx, stmt->stmt_if.else_branch);
+    emit_statement(ctx, stmt->stmt_if.else_branch);
   }
 
   IrInstr end_label_instr = {
@@ -314,8 +344,8 @@ static void handle_stmt_if(IrContext *ctx, AstStmt *stmt) {
   emit_ir_instr(ctx, end_label_instr);
 }
 
-static void handle_stmt_while(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "handle_stmt_while: stmt is NULL");
+static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_while: stmt is NULL");
 
   IrLabel start_label = next_label(ctx);
   IrLabel end_label = next_label(ctx);
@@ -333,7 +363,7 @@ static void handle_stmt_while(IrContext *ctx, AstStmt *stmt) {
   };
   emit_ir_instr(ctx, start_label_instr);
 
-  IrReg cond_reg = handle_expression(ctx, stmt->stmt_while.condition);
+  IrReg cond_reg = emit_expression(ctx, stmt->stmt_while.condition);
 
   IrInstr cond_jump_instr = {
     .op = IR_INST_JZ,
@@ -342,7 +372,7 @@ static void handle_stmt_while(IrContext *ctx, AstStmt *stmt) {
   };
   emit_ir_instr(ctx, cond_jump_instr);
 
-  handle_statement(ctx, stmt->stmt_while.body);
+  emit_statement(ctx, stmt->stmt_while.body);
 
   IrInstr jump_to_start_instr = {
     .op = IR_INST_JUMP,
@@ -359,51 +389,112 @@ static void handle_stmt_while(IrContext *ctx, AstStmt *stmt) {
   ctx->current_loop = loop_labels.parent;
 }
 
-static void handle_statement(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "handle_statement: stmt is NULL");
+static void emit_statement(IrContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_statement: stmt is NULL");
 
   switch (stmt->kind) {
   case STMT_BLOCK:
-    return handle_stmt_block(ctx, stmt);
+    return emit_stmt_block(ctx, stmt);
   case STMT_EXPRESSION:
-    return handle_stmt_expression(ctx, stmt);
+    return emit_stmt_expression(ctx, stmt);
   case STMT_VAR_DECL:
-    return handle_stmt_var_decl(ctx, stmt);
+    return emit_stmt_var_decl(ctx, stmt);
 
+  case STMT_RETURN:
+    return emit_stmt_return(ctx, stmt);
   case STMT_BREAK:
-    return handle_stmt_break(ctx, stmt);
+    return emit_stmt_break(ctx, stmt);
   case STMT_CONTINUE:
-    return handle_stmt_continue(ctx, stmt);
+    return emit_stmt_continue(ctx, stmt);
 
   case STMT_IF:
-    return handle_stmt_if(ctx, stmt);
+    return emit_stmt_if(ctx, stmt);
   case STMT_WHILE:
-    return handle_stmt_while(ctx, stmt);
+    return emit_stmt_while(ctx, stmt);
 
   case STMT_INVALID:
-    fprintf(stderr, "ir_handle_statement: encountered STMT_INVALID node\n");
+    fprintf(stderr, "ir_emit_statement: encountered STMT_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
-  fprintf(stderr, "ir_handle_statement: unhandled AST statement kind %d\n", stmt->kind);
+  fprintf(stderr, "ir_emit_statement: unhandled AST statement kind %d\n", stmt->kind);
   exit(EXIT_FAILURE);
 }
 
-void ir_buffer_free(IrContext *ctx) {
-  da_free(ctx->buffer);
+// Declaration handling
+static void emit_decl(IrContext *ctx, AstDecl *decl);
+
+static void emit_decl_function(IrContext *ctx, AstDecl *decl) {
+  assert(decl && "emit_decl_function: decl is NULL");
+
+  AstDeclFunction *func_decl = &decl->decl_function;
+
+  IrFunction ir_func = {
+    .name = decl->decl_function.name,
+    .return_type = NULL,
+    .params = NULL,
+    .param_count = 0,
+    .buffer = NULL,
+  };
+
+  ctx->next_reg = 1;
+  ctx->next_label = 1;
+  ctx->current_loop = NULL;
+  ctx->block_terminated = false;
+
+  da_append(ctx->module->functions, ir_func);
+  ctx->current_func_idx = da_len(ctx->module->functions) - 1;
+
+  emit_statement(ctx, func_decl->body);
 }
 
-void ir_gen_init(IrContext *ctx, CompilationUnit *comp_unit) {
-  ctx->buffer = NULL;
+static void emit_decl(IrContext *ctx, AstDecl *decl) {
+  assert(decl && "emit_decl: decl is NULL");
+
+  switch (decl->kind) {
+  case DECL_FUNCTION:
+    return emit_decl_function(ctx, decl);
+
+  case DECL_INVALID:
+    fprintf(stderr, "ir_emit_decl: encountered DECL_INVALID node\n");
+    exit(EXIT_FAILURE);
+  }
+
+  fprintf(stderr, "ir_emit_decl: unhandled AST declaration kind %d\n", decl->kind);
+  exit(EXIT_FAILURE);
+}
+
+void ir_init(IrContext *ctx, CompilationUnit *comp_unit) {
   ctx->comp_unit = comp_unit;
-  ctx->current_loop = NULL;
+
+  ctx->module = NULL;
+  ctx->current_func_idx = 0;
 
   ctx->next_reg = 1;
   ctx->next_label = 1;
 
+  ctx->current_loop = NULL;
   ctx->block_terminated = false;
 }
 
-void emit_ir(IrContext *ctx, AstStmt *root) {
-  handle_statement(ctx, root);
+void ir_free(IrContext *ctx) {
+  for (size_t i = 0; i < da_len(ctx->module->functions); i++) {
+    IrFunction *func = &ctx->module->functions[i];
+    da_free(func->buffer);
+  }
+  da_free(ctx->module->functions);
+}
+
+void emit_ir(IrContext *ctx, AstProgram *program) {
+  if (!program) {
+    return;
+  }
+
+  IrModule *module = arena_alloc(&ctx->comp_unit->arena, sizeof(IrModule));
+  module->functions = NULL;
+  ctx->module = module;
+
+  for (size_t i = 0; i < program->decl_count; i++) {
+    emit_decl(ctx, program->decls[i]);
+  }
 }

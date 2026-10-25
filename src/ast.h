@@ -39,6 +39,7 @@ typedef enum {
   EXPR_IDENTIFIER,
 
   EXPR_ASSIGN,
+  EXPR_CALL,
 
   EXPR_UNARY,
   EXPR_BINARY,
@@ -72,6 +73,12 @@ typedef struct {
 } AstAssignment;
 
 typedef struct {
+  AstExpr *callee;
+  AstExpr **arguments;
+  size_t argument_count;
+} AstCall;
+
+typedef struct {
   UnaryOp op;
   AstExpr *operand;
 } AstExprUnary;
@@ -91,6 +98,7 @@ struct AstExpr_ {
     AstLiteral literal;
     AstIdentifier identifier;
 
+    AstCall expr_call;
     AstAssignment assignment;
 
     AstExprUnary expr_unary;
@@ -106,6 +114,8 @@ typedef enum {
   STMT_BLOCK,
   STMT_EXPRESSION,
   STMT_VAR_DECL,
+
+  STMT_RETURN,
   STMT_BREAK,
   STMT_CONTINUE,
 
@@ -129,6 +139,10 @@ typedef struct {
 } AstStmtVarDecl;
 
 typedef struct {
+  AstExpr *value;
+} AstStmtReturn;
+
+typedef struct {
   AstExpr *condition;
   AstStmt *then_branch;
   AstStmt *else_branch;
@@ -149,6 +163,8 @@ struct AstStmt_ {
     AstStmtExpr stmt_expr;
     AstStmtVarDecl stmt_var_decl;
 
+    AstStmtReturn stmt_return;
+
     AstStmtIf stmt_if;
     AstStmtWhile stmt_while;
   };
@@ -158,12 +174,17 @@ struct AstStmt_ {
 
 typedef enum {
   DECL_INVALID,
+  DECL_FUNCTION,
 } AstDeclKind;
 
 typedef struct {
-  char *name;
-  AstExpr *init;
-} AstDeclVar;
+  const char *name;
+
+  AstType *return_type;
+  AstStmt *body;
+
+  Symbol *symbol;
+} AstDeclFunction;
 
 struct AstDecl_ {
   AstDeclKind kind;
@@ -171,7 +192,7 @@ struct AstDecl_ {
   SourceLoc loc;
 
   union {
-    AstDeclVar decl_var;
+    AstDeclFunction decl_function;
   };
 };
 
@@ -197,7 +218,10 @@ struct AstType_ {
   };
 };
 
-void ast_arena_free(Arena *arena);
+typedef struct {
+  AstDecl **decls;
+  uint32_t decl_count;
+} AstProgram;
 
 AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc);
 AstStmt *ast_stmt_new(Arena *arena, AstStmtKind kind, SourceLoc loc);
