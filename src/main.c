@@ -38,10 +38,10 @@ int main(int argc, char **argv) {
 
   AstProgram *program = parse_program(&parser);
 
-  SemaContext ctx;
-  sema_init(&ctx, &comp_unit);
+  SemaContext sema_ctx;
+  sema_init(&sema_ctx, &comp_unit);
 
-  sema_program(&ctx, program);
+  sema_program(&sema_ctx, program);
 
   printf("Had error: %s\n", comp_unit.had_error ? "true" : "false");
 
@@ -51,11 +51,11 @@ int main(int argc, char **argv) {
   }
 
   IrContext ir_context;
-  ir_init(&ir_context, &comp_unit);
+  ir_init(&ir_context, &comp_unit, &sema_ctx);
 
   emit_ir(&ir_context, program);
 
-  debug_print_ir_module(ir_context.module);
+  // debug_print_ir_module(ir_context.module);
 
   generate_qbe("out.ssa", &ir_context);
 

@@ -15,13 +15,13 @@ bool type_is_void(Type *type) {
 bool type_is_integer(Type *type) {
   if (!type) return false;
   if (type == TYPE_error) return true;
-  return type == TYPE_i64;
+  return type == TYPE_i64 || type == TYPE_i32;
 }
 
 bool type_is_float(Type *type) {
   if (!type) return false;
   if (type == TYPE_error) return true;
-  return type == TYPE_f64;
+  return type == TYPE_f64 || type == TYPE_f32;
 }
 
 bool type_is_bool(Type *type) {
@@ -36,22 +36,16 @@ bool type_is_numeric(Type *type) {
   return type_is_integer(type) || type_is_float(type);
 }
 
-bool type_is_pointer(Type *type) {
-  if (!type) return false;
-  if (type == TYPE_error) return true;
-  return type == TYPE_ptr;
-}
-
 bool type_is_orderable(Type *type) {
   if (!type) return false;
   if (type == TYPE_error) return true;
-  return type_is_numeric(type) || type_is_pointer(type);
+  return type_is_numeric(type);
 }
 
 bool type_is_comparable(Type *type) {
   if (!type) return false;
   if (type == TYPE_error) return true;
-  return type_is_numeric(type) || type_is_pointer(type) || type_is_bool(type);
+  return type_is_numeric(type) || type_is_bool(type);
 }
 
 bool type_equals(Type *a, Type *b) {

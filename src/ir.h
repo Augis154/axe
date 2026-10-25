@@ -3,6 +3,7 @@
 
 #include "ast.h"
 #include "compiler.h"
+#include "sema.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +40,15 @@ typedef enum {
   IR_INST_RETURN,
 } IrOp;
 
+typedef enum {
+  IR_TYPE_NONE = 0,
+
+  IR_TYPE_WORD,
+  IR_TYPE_LONG,
+  IR_TYPE_SPF, // Single-precision float
+  IR_TYPE_DPF, // Double-precision float
+} IrType;
+
 typedef struct {
   uint32_t id;
 } IrReg;
@@ -57,11 +67,20 @@ typedef struct LoopLabels_ {
 } LoopLabels;
 
 typedef struct {
+  IrReg reg;
+  IrType type;
+} IrFuncArg;
+
+typedef struct {
   IrOp op;
 
   union {
     IrReg res;
     IrLabel target;
+    struct {
+      IrLabel target_true;
+      IrLabel target_false;
+    };
   };
 
   union {
@@ -69,19 +88,34 @@ typedef struct {
       IrReg arg1;
       IrReg arg2;
     };
+
     int64_t literal;
+
     const char *var_name;
+
+    struct {
+      const char *callee;
+      IrFuncArg *args;
+      size_t arg_count;
+    } call;
   };
 } IrInstr;
 
 typedef struct {
   const char *name;
-  Type *return_type;
+  IrType type;
+  IrReg reg;
+} IrFuncParam;
 
-  Symbol **params;
+typedef struct {
+  const char *name;
+  IrType return_type;
+
+  IrFuncParam *params;
   uint32_t param_count;
 
   IrInstr *buffer;
+  IrType *reg_types;
 } IrFunction;
 
 typedef struct {
@@ -90,6 +124,7 @@ typedef struct {
 
 typedef struct {
   CompilationUnit *comp_unit;
+  SemaContext *sema_ctx;
 
   IrModule *module;
   uint32_t current_func_idx;
@@ -101,7 +136,7 @@ typedef struct {
   bool block_terminated;
 } IrContext;
 
-void ir_init(IrContext *context, CompilationUnit *comp_unit);
+void ir_init(IrContext *context, CompilationUnit *comp_unit, SemaContext *sema_ctx);
 void ir_free(IrContext *context);
 
 void emit_ir(IrContext *ctx, AstProgram *program);

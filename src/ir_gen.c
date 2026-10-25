@@ -1,21 +1,17 @@
 #include "ast.h"
-#include "ir.h"
 
+#include "ir.h"
 #include "lib/array.h"
+#include "sema.h"
+#include "types.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define next_reg(ctx)       \
-  (IrReg) {                 \
-    .id = (ctx)->next_reg++ \
-  }
-
-#define next_label(ctx)       \
-  (IrLabel) {                 \
-    .id = (ctx)->next_label++ \
-  }
+static inline IrFunction *get_current_func(IrContext *ctx) {
+  return &ctx->module->functions[ctx->current_func_idx];
+}
 
 static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
   if (instr.op == IR_INST_LABEL) {
@@ -26,12 +22,50 @@ static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
     return;
   }
 
-  IrFunction *current_function = &ctx->module->functions[ctx->current_func_idx];
-  da_append(current_function->buffer, instr);
+  IrFunction *current_func = get_current_func(ctx);
+  da_append(current_func->buffer, instr);
 
-  if (instr.op == IR_INST_JUMP) {
+  if (instr.op == IR_INST_JUMP || instr.op == IR_INST_RETURN) {
     ctx->block_terminated = true;
   }
+}
+
+static IrType get_ir_type(Type *type) {
+  if (!type) return IR_TYPE_WORD;
+
+  switch (type->kind) {
+  case TYPE_I32:
+    return IR_TYPE_WORD;
+  case TYPE_I64:
+    return IR_TYPE_LONG;
+
+  case TYPE_F32:
+    return IR_TYPE_SPF;
+  case TYPE_F64:
+    return IR_TYPE_DPF;
+
+  case TYPE_BOOL:
+    return IR_TYPE_WORD;
+
+  case TYPE_FUNCTION:
+  case TYPE_ERROR:
+  case TYPE_VOID:
+    return IR_TYPE_NONE;
+  }
+
+  return IR_TYPE_WORD;
+}
+
+static IrReg next_reg(IrContext *ctx, Type *type) {
+  IrFunction *current_func = get_current_func(ctx);
+  IrReg reg = (IrReg){.id = (ctx)->next_reg++};
+  da_append(current_func->reg_types, get_ir_type(type));
+  return reg;
+}
+
+static IrLabel next_label(IrContext *ctx) {
+  IrLabel label = (IrLabel){.id = (ctx)->next_label++};
+  return label;
 }
 
 // Expression handling
@@ -106,7 +140,7 @@ static IrReg emit_literal(IrContext *ctx, AstExpr *node) {
     exit(EXIT_FAILURE);
   }
 
-  IrReg res = next_reg(ctx);
+  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
     .op = IR_INST_LOAD_LITERAL,
@@ -121,7 +155,7 @@ static IrReg emit_literal(IrContext *ctx, AstExpr *node) {
 static IrReg emit_identifier(IrContext *ctx, AstExpr *node) {
   assert(node && "emit_identifier: node is NULL");
 
-  IrReg res = next_reg(ctx);
+  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
     .op = IR_INST_LOAD_VAR,
@@ -151,12 +185,34 @@ static IrReg emit_assignment(IrContext *ctx, AstExpr *node) {
 static IrReg emit_call(IrContext *ctx, AstExpr *node) {
   assert(node && "emit_call: node is NULL");
 
-  IrReg res = next_reg(ctx);
+  IrFuncArg *arg_params = NULL;
+  size_t arg_count = node->expr_call.argument_count;
+
+  if (arg_count > 0) {
+    arg_params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrFuncArg) * arg_count);
+
+    for (size_t i = 0; i < arg_count; i++) {
+      AstExpr *arg_expr = node->expr_call.arguments[i];
+
+      IrReg arg_reg = emit_expression(ctx, arg_expr);
+      Type *arg_type = ctx->sema_ctx->expr_types[arg_expr->id];
+
+      arg_params[i].reg = arg_reg;
+      arg_params[i].type = get_ir_type(arg_type);
+    }
+  }
+
+  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
     .op = IR_INST_CALL,
     .res = res,
-    .var_name = node->expr_call.callee->identifier.name,
+    .call =
+      {
+        .callee = node->expr_call.callee->identifier.name,
+        .args = arg_params,
+        .arg_count = arg_count,
+      },
   };
   emit_ir_instr(ctx, inst);
 
@@ -168,7 +224,7 @@ static IrReg emit_unary_op(IrContext *ctx, AstExpr *node) {
 
   IrReg operand = emit_expression(ctx, node->expr_unary.operand);
 
-  IrReg res = next_reg(ctx);
+  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
     .op = get_unary_ir_op(node->expr_unary.op),
@@ -186,7 +242,7 @@ static IrReg emit_binary_op(IrContext *ctx, AstExpr *node) {
   IrReg left = emit_expression(ctx, node->expr_binary.left);
   IrReg right = emit_expression(ctx, node->expr_binary.right);
 
-  IrReg res = next_reg(ctx);
+  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
     .op = get_binary_ir_op(node->expr_binary.op),
@@ -255,7 +311,7 @@ static void emit_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
   IrReg init_reg = emit_expression(ctx, stmt->stmt_var_decl.init);
 
   if (init_reg.id == NULL_REG.id) {
-    init_reg = next_reg(ctx);
+    init_reg = next_reg(ctx, TYPE_i32);
     IrInstr inst = {
       .op = IR_INST_LOAD_LITERAL,
       .res = init_reg,
@@ -307,34 +363,56 @@ static void emit_stmt_continue(IrContext *ctx, AstStmt *stmt) {
 static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_if: stmt is NULL");
 
-  IrLabel else_label = next_label(ctx);
+  IrLabel then_label = next_label(ctx);
   IrLabel end_label = next_label(ctx);
+  IrLabel else_label = stmt->stmt_if.else_branch ? next_label(ctx) : end_label;
 
+  // Conditional jump
   IrReg cond_reg = emit_expression(ctx, stmt->stmt_if.condition);
 
   IrInstr cond_jump_instr = {
-    .op = IR_INST_JZ,
+    .op = IR_INST_JNZ,
     .arg1 = cond_reg,
-    .target = else_label,
+    .target_true = then_label,
+    .target_false = else_label,
   };
   emit_ir_instr(ctx, cond_jump_instr);
 
+  // Then branch
+  IrInstr then_label_instr = {
+    .op = IR_INST_LABEL,
+    .target = then_label,
+  };
+  emit_ir_instr(ctx, then_label_instr);
+
   emit_statement(ctx, stmt->stmt_if.then_branch);
 
-  IrInstr jump_to_end_instr = {
-    .op = IR_INST_JUMP,
-    .target = end_label,
-  };
-  emit_ir_instr(ctx, jump_to_end_instr);
+  // Jump to end if the then branch is not terminated
+  if (!ctx->block_terminated) {
+    IrInstr jump_to_end_instr = {
+      .op = IR_INST_JUMP,
+      .target = end_label,
+    };
+    emit_ir_instr(ctx, jump_to_end_instr);
+  }
 
-  IrInstr else_label_instr = {
-    .op = IR_INST_LABEL,
-    .target = else_label,
-  };
-  emit_ir_instr(ctx, else_label_instr);
-
+  // Else branch
   if (stmt->stmt_if.else_branch) {
+    IrInstr else_label_instr = {
+      .op = IR_INST_LABEL,
+      .target = else_label,
+    };
+    emit_ir_instr(ctx, else_label_instr);
+
     emit_statement(ctx, stmt->stmt_if.else_branch);
+
+    if (!ctx->block_terminated) {
+      IrInstr end_label_instr = {
+        .op = IR_INST_LABEL,
+        .target = end_label,
+      };
+      emit_ir_instr(ctx, end_label_instr);
+    }
   }
 
   IrInstr end_label_instr = {
@@ -348,6 +426,7 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_while: stmt is NULL");
 
   IrLabel start_label = next_label(ctx);
+  IrLabel fallthrough_label = next_label(ctx);
   IrLabel end_label = next_label(ctx);
 
   LoopLabels loop_labels = {
@@ -366,19 +445,28 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
   IrReg cond_reg = emit_expression(ctx, stmt->stmt_while.condition);
 
   IrInstr cond_jump_instr = {
-    .op = IR_INST_JZ,
+    .op = IR_INST_JNZ,
     .arg1 = cond_reg,
-    .target = end_label,
+    .target_true = fallthrough_label,
+    .target_false = end_label,
   };
   emit_ir_instr(ctx, cond_jump_instr);
 
+  IrInstr fallthrough_label_instr = {
+    .op = IR_INST_LABEL,
+    .target = fallthrough_label,
+  };
+  emit_ir_instr(ctx, fallthrough_label_instr);
+
   emit_statement(ctx, stmt->stmt_while.body);
 
-  IrInstr jump_to_start_instr = {
-    .op = IR_INST_JUMP,
-    .target = start_label,
-  };
-  emit_ir_instr(ctx, jump_to_start_instr);
+  if (!ctx->block_terminated) {
+    IrInstr jump_to_start_instr = {
+      .op = IR_INST_JUMP,
+      .target = start_label,
+    };
+    emit_ir_instr(ctx, jump_to_start_instr);
+  }
 
   IrInstr end_label_instr = {
     .op = IR_INST_LABEL,
@@ -429,23 +517,54 @@ static void emit_decl_function(IrContext *ctx, AstDecl *decl) {
 
   AstDeclFunction *func_decl = &decl->decl_function;
 
-  IrFunction ir_func = {
-    .name = decl->decl_function.name,
-    .return_type = NULL,
-    .params = NULL,
-    .param_count = 0,
-    .buffer = NULL,
-  };
-
   ctx->next_reg = 1;
   ctx->next_label = 1;
   ctx->current_loop = NULL;
   ctx->block_terminated = false;
 
+  Type *return_type = func_decl->symbol->type->function.return_type;
+
+  IrFunction ir_func = {
+    .name = func_decl->name,
+    .return_type = get_ir_type(return_type),
+    .params = NULL,
+    .param_count = func_decl->param_count,
+    .buffer = NULL,
+    .reg_types = NULL,
+  };
+
+  da_append(ir_func.reg_types, IR_TYPE_NONE);
   da_append(ctx->module->functions, ir_func);
   ctx->current_func_idx = da_len(ctx->module->functions) - 1;
 
+  uint32_t param_count = func_decl->param_count;
+  IrFuncParam *params = NULL;
+
+  if (param_count > 0) {
+    params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrFuncParam) * param_count);
+
+    for (size_t i = 0; i < param_count; i++) {
+      AstFuncParam *param = &func_decl->params[i];
+
+      IrReg param_reg = next_reg(ctx, param->symbol->type);
+
+      params[i].name = param->symbol->name;
+      params[i].type = get_ir_type(param->symbol->type);
+      params[i].reg = param_reg;
+    }
+
+    get_current_func(ctx)->params = params;
+  }
+
   emit_statement(ctx, func_decl->body);
+
+  if (!ctx->block_terminated) {
+    IrInstr ret_inst = {
+      .op = IR_INST_RETURN,
+      .arg1 = NULL_REG,
+    };
+    emit_ir_instr(ctx, ret_inst);
+  }
 }
 
 static void emit_decl(IrContext *ctx, AstDecl *decl) {
@@ -464,8 +583,9 @@ static void emit_decl(IrContext *ctx, AstDecl *decl) {
   exit(EXIT_FAILURE);
 }
 
-void ir_init(IrContext *ctx, CompilationUnit *comp_unit) {
+void ir_init(IrContext *ctx, CompilationUnit *comp_unit, SemaContext *sema_ctx) {
   ctx->comp_unit = comp_unit;
+  ctx->sema_ctx = sema_ctx;
 
   ctx->module = NULL;
   ctx->current_func_idx = 0;
@@ -481,6 +601,7 @@ void ir_free(IrContext *ctx) {
   for (size_t i = 0; i < da_len(ctx->module->functions); i++) {
     IrFunction *func = &ctx->module->functions[i];
     da_free(func->buffer);
+    da_free(func->reg_types);
   }
   da_free(ctx->module->functions);
 }

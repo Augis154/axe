@@ -33,6 +33,7 @@
   X(TOKEN_OBRACE, "{")    \
   X(TOKEN_CBRACE, "}")    \
                           \
+  X(TOKEN_COMMA, ",")     \
   X(TOKEN_COLON, ":")     \
   X(TOKEN_SEMICOLON, ";")
 
