@@ -70,6 +70,15 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     debug_print_ast_sexpr(arena, node->assignment.value);
     printf(")");
     return;
+  case EXPR_CALL:
+    printf("(call ");
+    debug_print_ast_sexpr(arena, node->expr_call.callee);
+    for (size_t i = 0; i < node->expr_call.argument_count; i++) {
+      printf(" ");
+      debug_print_ast_sexpr(arena, node->expr_call.arguments[i]);
+    }
+    printf(")");
+    return;
 
   case EXPR_UNARY:
     printf("(%s ", unop_strings[node->expr_unary.op]);
@@ -131,10 +140,18 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
     }
     return;
 
+  case STMT_RETURN:
+    printf("Return Statement:\n");
+    if (stmt->stmt_return.value) {
+      print_indent(1);
+      printf("Value: ");
+      debug_print_ast_sexpr(arena, stmt->stmt_return.value);
+      printf("\n");
+    }
+    return;
   case STMT_BREAK:
     printf("Break Statement\n");
     return;
-
   case STMT_CONTINUE:
     printf("Continue Statement\n");
     return;
@@ -181,6 +198,13 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
   }
 
   switch (decl->kind) {
+  case DECL_FUNCTION:
+    printf("Function Declaration: %s\n", decl->decl_function.name);
+    print_indent(1);
+    printf("Body:\n");
+    debug_print_ast_stmt(arena, decl->decl_function.body);
+    return;
+
   case DECL_INVALID:
     printf("<invalid declaration node>\n");
     return;
@@ -189,9 +213,9 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
   printf("<unknown declaration type>\n");
 }
 
-void debug_print_ir_buffer(IrContext *ir_ctx) {
-  for (size_t i = 0; i < da_len(ir_ctx->buffer); i++) {
-    IrInstr *inst = &ir_ctx->buffer[i];
+void debug_print_ir_function(IrFunction *ir_func) {
+  for (size_t i = 0; i < da_len(ir_func->buffer); i++) {
+    IrInstr *inst = &ir_func->buffer[i];
 
     switch (inst->op) {
     case IR_INST_NONE:
@@ -262,9 +286,24 @@ void debug_print_ir_buffer(IrContext *ir_ctx) {
     case IR_INST_JNZ:
       printf("%zu: JNZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
       continue;
+
+    case IR_INST_CALL:
+      printf("%zu: CALL r%u, %s\n", i, inst->res.id, inst->var_name);
+      continue;
+    case IR_INST_RETURN:
+      printf("%zu: RETURN r%u\n", i, inst->arg1.id);
+      continue;
     }
 
     printf("%zu: Unknown instruction\n", i);
+  }
+}
+
+void debug_print_ir_module(IrModule *module) {
+  for (size_t i = 0; i < da_len(module->functions); i++) {
+    IrFunction *func = &module->functions[i];
+    printf("Function: %s\n", func->name);
+    debug_print_ir_function(func);
   }
 }
 

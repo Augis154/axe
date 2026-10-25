@@ -36,61 +36,31 @@ int main(int argc, char **argv) {
   Parser parser;
   parser_init(&parser, &comp_unit);
 
-  AstStmt *statements = NULL;
-
-  while (true) {
-    AstStmt *stmt = parse_statement(&parser);
-    if (!stmt) {
-      break;
-    }
-    da_append(statements, *stmt);
-
-    // debug_print_ast_stmt(&comp_unit.arena, stmt);
-
-    if (parser.next.kind == TOKEN_EOF) {
-      break;
-    }
-  }
+  AstProgram *program = parse_program(&parser);
 
   SemaContext ctx;
   sema_init(&ctx, &comp_unit);
 
-  for (size_t i = 0; i < da_len(statements); i++) {
-    sema_stmt(&ctx, &statements[i]);
-  }
-
-  // AstStmt *root = parse_statement(&parser);
-
-  // debug_print_ast_tree(&ast_arena, root);
-
-  // debug_print_ast_stmt(&ast_arena, root);
-  // printf("\n");
+  sema_program(&ctx, program);
 
   printf("Had error: %s\n", comp_unit.had_error ? "true" : "false");
 
   if (comp_unit.had_error) {
-    da_free(statements);
     cu_free(&comp_unit);
     return 1;
   }
 
   IrContext ir_context;
-  ir_gen_init(&ir_context, &comp_unit);
+  ir_init(&ir_context, &comp_unit);
 
-  for (size_t i = 0; i < da_len(statements); i++) {
-    AstStmt *stmt = &statements[i];
-    emit_ir(&ir_context, stmt);
-  }
+  emit_ir(&ir_context, program);
 
-  // emit_ir(&ir_context, root);
-
-  // debug_print_ir_buffer(&ir_context);
+  debug_print_ir_module(ir_context.module);
 
   generate_qbe("out.ssa", &ir_context);
 
-  ir_buffer_free(&ir_context);
+  ir_free(&ir_context);
 
-  da_free(statements);
   cu_free(&comp_unit);
 
   return 0;

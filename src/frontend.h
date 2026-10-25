@@ -45,11 +45,15 @@
 
 #define TOKENS_KEYWORDS(X)      \
   X(TOKEN_VAR, "var")           \
+  X(TOKEN_FN, "fn")             \
+                                \
+  X(TOKEN_RETURN, "return")     \
+  X(TOKEN_BREAK, "break")       \
+  X(TOKEN_CONTINUE, "continue") \
+                                \
   X(TOKEN_IF, "if")             \
   X(TOKEN_ELSE, "else")         \
-  X(TOKEN_WHILE, "while")       \
-  X(TOKEN_BREAK, "break")       \
-  X(TOKEN_CONTINUE, "continue")
+  X(TOKEN_WHILE, "while")
 
 #define TOKEN_LIST(X) \
   TOKENS_SPECIAL(X)   \
@@ -113,5 +117,7 @@ AstExpr *parse_expression(Parser *parser);
 AstStmt *parse_statement(Parser *parser);
 AstDecl *parse_declaration(Parser *parser);
 AstType *parse_type(Parser *parser);
+
+AstProgram *parse_program(Parser *parser);
 
 #endif // FRONTEND_H

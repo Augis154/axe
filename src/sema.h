@@ -12,6 +12,7 @@ typedef enum {
   SYMBOL_TYPE,
   SYMBOL_LOCAL_VAR,
   SYMBOL_GLOBAL_VAR,
+  SYMBOL_FUNCTION,
 } SymbolKind;
 
 typedef struct Symbol_ {
@@ -36,6 +37,8 @@ typedef struct {
   CompilationUnit *comp_unit;
 
   Scope *current_scope;
+  AstDeclFunction *current_function;
+
   uint32_t next_symbol_id;
   uint32_t loop_depth;
 
@@ -47,6 +50,9 @@ void sema_init(SemaContext *ctx, CompilationUnit *comp_unit);
 
 Type *sema_expr(SemaContext *ctx, AstExpr *expr);
 void sema_stmt(SemaContext *ctx, AstStmt *stmt);
+void sema_decl(SemaContext *ctx, AstDecl *decl);
 Type *sema_type(SemaContext *ctx, AstType *type);
+
+void sema_program(SemaContext *ctx, AstProgram *program);
 
 #endif // SEMA_H

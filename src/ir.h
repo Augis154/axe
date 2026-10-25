@@ -34,6 +34,9 @@ typedef enum {
   IR_INST_JUMP,
   IR_INST_JZ,
   IR_INST_JNZ,
+
+  IR_INST_CALL,
+  IR_INST_RETURN,
 } IrOp;
 
 typedef struct {
@@ -72,20 +75,35 @@ typedef struct {
 } IrInstr;
 
 typedef struct {
-  CompilationUnit *comp_unit;
+  const char *name;
+  Type *return_type;
+
+  Symbol **params;
+  uint32_t param_count;
 
   IrInstr *buffer;
-  LoopLabels *current_loop;
+} IrFunction;
+
+typedef struct {
+  IrFunction *functions;
+} IrModule;
+
+typedef struct {
+  CompilationUnit *comp_unit;
+
+  IrModule *module;
+  uint32_t current_func_idx;
 
   uint32_t next_reg;
   uint32_t next_label;
 
+  LoopLabels *current_loop;
   bool block_terminated;
 } IrContext;
 
-void ir_gen_init(IrContext *context, CompilationUnit *comp_unit);
-void ir_buffer_free(IrContext *context);
+void ir_init(IrContext *context, CompilationUnit *comp_unit);
+void ir_free(IrContext *context);
 
-void emit_ir(IrContext *context, AstStmt *root);
+void emit_ir(IrContext *ctx, AstProgram *program);
 
 #endif // IR_H

@@ -1,25 +1,9 @@
-var outer: i64 = 0;
-var total: i64 = 0;
-
-while outer < 3 {
-  outer = outer + 1;
-
-  var inner: i64 = 0;
-  while inner < 10 {
-    inner = inner + 1;
-
-    # 1. Test CONTINUE: skip inner == 2
-    if inner == 2 {
-      continue;
-    }
-
-    # 2. Test BREAK: stop inner loop at 4
-    if inner == 4 {
-      break;
-    }
-
-    total = total + 1;
-  }
+fn foo(): i64 {
+  var a = 1;
+  return a + 2;
 }
 
-total;
+fn main(): i64 {
+  var a = foo();
+  return a;
+}
