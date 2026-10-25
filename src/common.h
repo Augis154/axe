@@ -13,6 +13,7 @@ typedef struct Symbol_ Symbol;
 typedef struct Scope_ Scope;
 
 typedef struct {
+  const char *filename;
   size_t line;
 } SourceLoc;
 

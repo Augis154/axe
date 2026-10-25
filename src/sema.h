@@ -8,9 +8,11 @@
 
 #include <stdint.h>
 
-#define TYPES_BUILTIN(X) \
-  X(TYPE_VOID, 0, void)  \
-  X(TYPE_I64, 8, i64)    \
+#define TYPES_BUILTIN(X)  \
+  X(TYPE_ERROR, 0, error) \
+  X(TYPE_VOID, 0, void)   \
+  X(TYPE_I64, 8, i64)     \
+  X(TYPE_F64, 8, f64)     \
   X(TYPE_BOOL, 1, bool)
 
 typedef enum {
@@ -33,9 +35,13 @@ typedef enum {
 
 typedef struct Symbol_ {
   SymbolKind kind;
+  uint32_t id;
+
+  SourceLoc loc;
+
   const char *name;
   Type *type;
-  uint32_t id;
+
   struct Symbol_ *next;
 } Symbol;
 

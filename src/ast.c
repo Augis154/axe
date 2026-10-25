@@ -11,42 +11,46 @@ void ast_arena_free(Arena *arena) {
   arena_free(arena);
 }
 
-AstExpr *ast_expr_new(Arena *arena, AstExprKind type) {
+AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc) {
   AstExpr *expr = arena_alloc(arena, sizeof(AstExpr));
 
   memset(expr, 0, sizeof(AstExpr));
-  expr->type = type;
+  expr->kind = kind;
   expr->id = expr_id++;
+  expr->loc = loc;
 
   return expr;
 }
 
-AstStmt *ast_stmt_new(Arena *arena, AstStmtKind type) {
+AstStmt *ast_stmt_new(Arena *arena, AstStmtKind kind, SourceLoc loc) {
   AstStmt *stmt = arena_alloc(arena, sizeof(AstStmt));
 
   memset(stmt, 0, sizeof(AstStmt));
-  stmt->type = type;
+  stmt->kind = kind;
   stmt->id = stmt_id++;
+  stmt->loc = loc;
 
   return stmt;
 }
 
-AstDecl *ast_decl_new(Arena *arena, AstDeclKind type) {
+AstDecl *ast_decl_new(Arena *arena, AstDeclKind kind, SourceLoc loc) {
   AstDecl *decl = arena_alloc(arena, sizeof(AstDecl));
 
   memset(decl, 0, sizeof(AstDecl));
-  decl->type = type;
+  decl->kind = kind;
   decl->id = decl_id++;
+  decl->loc = loc;
 
   return decl;
 }
 
-AstType *ast_type_new(Arena *arena, AstTypeKind kind) {
+AstType *ast_type_new(Arena *arena, AstTypeKind kind, SourceLoc loc) {
   AstType *type = arena_alloc(arena, sizeof(AstType));
 
   memset(type, 0, sizeof(AstType));
   type->kind = kind;
   type->id = type_id++;
+  type->loc = loc;
 
   return type;
 }

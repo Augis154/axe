@@ -83,8 +83,9 @@ typedef struct {
 } AstExprBinary;
 
 struct AstExpr_ {
-  AstExprKind type;
+  AstExprKind kind;
   uint32_t id;
+  SourceLoc loc;
 
   union {
     AstLiteral literal;
@@ -129,24 +130,25 @@ typedef struct {
   AstExpr *condition;
   AstStmt *then_branch;
   AstStmt *else_branch;
-} AstIfStmt;
+} AstStmtIf;
 
 typedef struct {
   AstExpr *condition;
   AstStmt *body;
-} AstWhileStmt;
+} AstStmtWhile;
 
 struct AstStmt_ {
-  AstStmtKind type;
+  AstStmtKind kind;
   uint32_t id;
+  SourceLoc loc;
 
   union {
     AstStmtBlock stmt_block;
     AstStmtExpr stmt_expr;
     AstStmtVarDecl stmt_var_decl;
 
-    AstIfStmt stmt_if;
-    AstWhileStmt stmt_while;
+    AstStmtIf stmt_if;
+    AstStmtWhile stmt_while;
   };
 };
 
@@ -162,8 +164,9 @@ typedef struct {
 } AstDeclVar;
 
 struct AstDecl_ {
-  AstDeclKind type;
+  AstDeclKind kind;
   uint32_t id;
+  SourceLoc loc;
 
   union {
     AstDeclVar decl_var;
@@ -184,6 +187,7 @@ typedef struct {
 struct AstType_ {
   AstTypeKind kind;
   uint32_t id;
+  SourceLoc loc;
 
   union {
     const char *named;
@@ -193,10 +197,10 @@ struct AstType_ {
 
 void ast_arena_free(Arena *arena);
 
-AstExpr *ast_expr_new(Arena *arena, AstExprKind type);
-AstStmt *ast_stmt_new(Arena *arena, AstStmtKind type);
-AstDecl *ast_decl_new(Arena *arena, AstDeclKind type);
-AstType *ast_type_new(Arena *arena, AstTypeKind kind);
+AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc);
+AstStmt *ast_stmt_new(Arena *arena, AstStmtKind kind, SourceLoc loc);
+AstDecl *ast_decl_new(Arena *arena, AstDeclKind kind, SourceLoc loc);
+AstType *ast_type_new(Arena *arena, AstTypeKind kind, SourceLoc loc);
 
 uint32_t ast_expr_count();
 uint32_t ast_stmt_count();
