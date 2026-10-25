@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
     }
     da_append(statements, *stmt);
 
-    // debug_print_ast_stmt(&comp_unit.ast_arena, stmt);
+    // debug_print_ast_stmt(&comp_unit.arena, stmt);
 
     if (parser.next.kind == TOKEN_EOF) {
       break;

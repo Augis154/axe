@@ -47,6 +47,12 @@ typedef struct {
 #define NULL_REG ((IrReg){0})
 #define NULL_LABEL ((IrLabel){0})
 
+typedef struct LoopLabels_ {
+  IrLabel continue_label;
+  IrLabel break_label;
+  struct LoopLabels_ *parent;
+} LoopLabels;
+
 typedef struct {
   IrOp op;
 
@@ -69,9 +75,12 @@ typedef struct {
   CompilationUnit *comp_unit;
 
   IrInstr *buffer;
+  LoopLabels *current_loop;
 
   uint32_t next_reg;
   uint32_t next_label;
+
+  bool block_terminated;
 } IrContext;
 
 void ir_gen_init(IrContext *context, CompilationUnit *comp_unit);

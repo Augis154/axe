@@ -77,7 +77,7 @@ static bool match(Parser *parser, TokenKind kind) {
 
 static bool consume(Parser *parser, TokenKind kind, const char *message) {
   if (match(parser, kind)) return true;
-  error_at(parser, parser->next, message);
+  error_at(parser, parser->current, message);
   return false;
 }
 
@@ -372,12 +372,36 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
   return stmt;
 }
 
+static AstStmt *parse_break_statement(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
+  consume(parser, TOKEN_BREAK, "Expected 'break' keyword for break statement.");
+  consume(parser, TOKEN_SEMICOLON, "Expected ';' after 'break' statement.");
+
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BREAK, start_loc);
+  return stmt;
+}
+
+static AstStmt *parse_continue_statement(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
+  consume(parser, TOKEN_CONTINUE, "Expected 'continue' keyword for continue statement.");
+  consume(parser, TOKEN_SEMICOLON, "Expected ';' after 'continue' statement.");
+
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_CONTINUE, start_loc);
+  return stmt;
+}
+
 static AstStmt *parse_if_statement(Parser *parser) {
   SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_IF, "Expected 'if' keyword for if statement.");
 
   AstExpr *condition = parse_expression(parser);
+
+  if (!check(parser, TOKEN_OBRACE)) {
+    error_at(parser, parser->current, "Expected '{' after 'if' condition.");
+  }
 
   AstStmt *then_branch = parse_block(parser);
 
@@ -400,6 +424,10 @@ static AstStmt *parse_while_statement(Parser *parser) {
   consume(parser, TOKEN_WHILE, "Expected 'while' keyword for while statement.");
 
   AstExpr *condition = parse_expression(parser);
+
+  if (!check(parser, TOKEN_OBRACE)) {
+    error_at(parser, parser->current, "Expected '{' after 'while' condition.");
+  }
 
   AstStmt *body = parse_block(parser);
 
@@ -463,6 +491,11 @@ AstStmt *parse_statement(Parser *parser) {
     return parse_block(parser);
   case TOKEN_VAR:
     return parse_variable_declaration(parser);
+
+  case TOKEN_BREAK:
+    return parse_break_statement(parser);
+  case TOKEN_CONTINUE:
+    return parse_continue_statement(parser);
 
   case TOKEN_IF:
     return parse_if_statement(parser);

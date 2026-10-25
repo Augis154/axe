@@ -1,17 +1,25 @@
-var x: i64;
-var f: f64;
+var outer: i64 = 0;
+var total: i64 = 0;
 
-# x = 5 + (x < 5);
+while outer < 3 {
+  outer = outer + 1;
 
+  var inner: i64 = 0;
+  while inner < 10 {
+    inner = inner + 1;
 
-while x < 10 {
-  x = x + 1;
+    # 1. Test CONTINUE: skip inner == 2
+    if inner == 2 {
+      continue;
+    }
+
+    # 2. Test BREAK: stop inner loop at 4
+    if inner == 4 {
+      break;
+    }
+
+    total = total + 1;
+  }
 }
 
-if x == 10 {
-  x = x + 5;
-} else {
-  x = 5;
-}
-
-x;
+total;
