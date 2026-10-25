@@ -27,16 +27,13 @@ typedef struct {
 static const ParseRule rules[TOKEN_COUNT];
 
 static const ParseRule *get_rule(TokenKind kind) {
-  if (kind < 0 || kind >= TOKEN_COUNT) {
-    return NULL;
-  }
+  if (kind < 0 || kind >= TOKEN_COUNT) return NULL;
   return &rules[kind];
 }
 
 static void error_at(Parser *parser, Token token, const char *message) {
-  if (parser->panic_mode) {
-    return;
-  }
+  if (parser->panic_mode) return;
+
   parser->panic_mode = true;
   parser->comp_unit->had_error = true;
 
@@ -73,19 +70,13 @@ static inline bool check(Parser *parser, TokenKind kind) {
 }
 
 static bool match(Parser *parser, TokenKind kind) {
-  if (!check(parser, kind)) {
-    return false;
-  }
-
+  if (!check(parser, kind)) return false;
   advance(parser);
   return true;
 }
 
 static bool consume(Parser *parser, TokenKind kind, const char *message) {
-  if (match(parser, kind)) {
-    return true;
-  }
-
+  if (match(parser, kind)) return true;
   error_at(parser, parser->next, message);
   return false;
 }
@@ -100,9 +91,7 @@ static const char *parse_identifier_name(Parser *parser, Token token) {
 }
 
 static inline bool is_lvalue(const AstExpr *node) {
-  if (!node) {
-    return false;
-  }
+  if (!node) return false;
 
   switch (node->kind) {
   case EXPR_IDENTIFIER:
@@ -244,9 +233,7 @@ static AstExpr *parse_float_literal(Parser *parser) {
 
 static AstExpr *parse_identifier(Parser *parser) {
   const char *identifier_name = parse_identifier_name(parser, parser->current);
-  if (!identifier_name) {
-    return NULL;
-  }
+  if (!identifier_name) return NULL;
 
   AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_IDENTIFIER, parser->current.loc);
   expr->identifier.name = identifier_name;
@@ -375,9 +362,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
   }
 
   const char *var_name = parse_identifier_name(parser, name_token);
-  if (!var_name) {
-    return NULL;
-  }
+  if (!var_name) return NULL;
 
   AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_VAR_DECL, name_token.loc);
   stmt->stmt_var_decl.name = var_name;
@@ -435,9 +420,7 @@ static AstType *parse_named_type(Parser *parser) {
   consume(parser, TOKEN_IDENT, "Expected type name for named type.");
 
   const char *type_name = parse_identifier_name(parser, parser->current);
-  if (!type_name) {
-    return NULL;
-  }
+  if (!type_name) return NULL;
 
   AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_NAMED, start_loc);
   type->named = type_name;
@@ -451,9 +434,7 @@ static AstType *parse_pointer_type(Parser *parser) {
   consume(parser, TOKEN_STAR, "Expected '*' for pointer type.");
 
   AstType *base_type = parse_type(parser);
-  if (!base_type) {
-    return NULL;
-  }
+  if (!base_type) return NULL;
 
   AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_POINTER, start_loc);
   type->pointer.base = base_type;

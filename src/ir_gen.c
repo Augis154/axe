@@ -191,9 +191,7 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
 static void handle_statement(IrContext *context, AstStmt *stmt);
 
 static void handle_stmt_block(IrContext *context, AstStmt *stmt) {
-  if (!stmt) {
-    return;
-  }
+  if (!stmt) return;
 
   for (size_t i = 0; i < stmt->stmt_block.count; i++) {
     AstStmt *inner_stmt = stmt->stmt_block.statements[i];
@@ -202,17 +200,13 @@ static void handle_stmt_block(IrContext *context, AstStmt *stmt) {
 }
 
 static void handle_stmt_expression(IrContext *context, AstStmt *stmt) {
-  if (!stmt) {
-    return;
-  }
+  if (!stmt) return;
 
   handle_expression(context, stmt->stmt_expr.expression);
 }
 
 static void handle_stmt_var_decl(IrContext *context, AstStmt *stmt) {
-  if (!stmt) {
-    return;
-  }
+  if (!stmt) return;
 
   IrReg init_reg = handle_expression(context, stmt->stmt_var_decl.init);
 
@@ -235,9 +229,7 @@ static void handle_stmt_var_decl(IrContext *context, AstStmt *stmt) {
 }
 
 static void handle_stmt_if(IrContext *context, AstStmt *stmt) {
-  if (!stmt) {
-    return;
-  }
+  if (!stmt) return;
 
   IrLabel else_label = next_label(context);
   IrLabel end_label = next_label(context);
@@ -277,9 +269,7 @@ static void handle_stmt_if(IrContext *context, AstStmt *stmt) {
 }
 
 static void handle_stmt_while(IrContext *context, AstStmt *stmt) {
-  if (!stmt) {
-    return;
-  }
+  if (!stmt) return;
 
   IrLabel start_label = next_label(context);
   IrLabel end_label = next_label(context);
@@ -315,9 +305,7 @@ static void handle_stmt_while(IrContext *context, AstStmt *stmt) {
 }
 
 static void handle_statement(IrContext *context, AstStmt *stmt) {
-  if (!stmt) {
-    return;
-  }
+  if (!stmt) return;
 
   switch (stmt->kind) {
   case STMT_BLOCK:

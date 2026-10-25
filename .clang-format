@@ -18,3 +18,4 @@ BinPackArguments: false
 BinPackLongBracedList: false
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
