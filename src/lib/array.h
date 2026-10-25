@@ -26,17 +26,15 @@
       assert(ptr != NULL && "Memory allocation failed");                     \
                                                                              \
       ptr[0] = new_cap;                                                      \
-      if (!(array))                                                          \
-        ptr[1] = 0;                                                          \
+      if (!(array)) ptr[1] = 0;                                              \
       (array) = (void *)(ptr + 2);                                           \
     }                                                                        \
   } while (0)
 
-#define da_set_len(array, len)   \
-  do {                           \
-    da_reserve(array, (len));    \
-    if (array)                   \
-      da_head(array)[1] = (len); \
+#define da_set_len(array, len)            \
+  do {                                    \
+    da_reserve(array, (len));             \
+    if (array) da_head(array)[1] = (len); \
   } while (0)
 
 #define da_append(array, element)             \

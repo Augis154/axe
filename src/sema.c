@@ -2,18 +2,11 @@
 
 #include "lib/arena.h"
 #include "lib/str_table.h"
+#include "types.h"
 
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
-
-#define TYPE_DEFINE(kind, size, ident) static Type TYPE_##ident##_DEF = {kind, size, #ident};
-TYPES_BUILTIN(TYPE_DEFINE)
-#undef TYPE_DEFINE
-
-#define TYPE_PTRS(kind, size, ident) Type *TYPE_##ident = &TYPE_##ident##_DEF;
-TYPES_BUILTIN(TYPE_PTRS)
-#undef TYPE_PTRS
 
 static void sema_error(SemaContext *ctx, SourceLoc loc, const char *message, ...) {
   ctx->comp_unit->had_error = true;
@@ -118,14 +111,12 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
 
 static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   Symbol *sym = scope_lookup(ctx->current_scope, expr->identifier.name);
-  if (!sym) {
-    sema_error(ctx, expr->loc, "Undefined identifier '%s'", expr->identifier.name);
+  if (sym) return sym->type;
 
-    scope_insert(ctx, expr->identifier.name, SYMBOL_LOCAL_VAR, TYPE_error, expr->loc);
-    return TYPE_error;
-  }
+  sema_error(ctx, expr->loc, "Undefined identifier '%s'", expr->identifier.name);
 
-  return sym->type;
+  scope_insert(ctx, expr->identifier.name, SYMBOL_LOCAL_VAR, TYPE_error, expr->loc);
+  return TYPE_error;
 }
 
 static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
@@ -153,16 +144,19 @@ static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
 
   switch (expr->expr_unary.op) {
   case UNOP_NEGATE:
-    if (operand_type != TYPE_i64) {
-      sema_error(ctx, expr->loc, "Unary '-' operator requires 'int' type");
+    if (!type_is_numeric(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '-' operator requires numeric type");
       return TYPE_error;
     }
+
     return operand_type;
+
   case UNOP_NOT:
-    if (operand_type != TYPE_bool) {
+    if (!type_is_bool(operand_type)) {
       sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
       return TYPE_error;
     }
+
     return operand_type;
 
   case UNOP_COUNT:
@@ -187,22 +181,47 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_SUB:
   case BINOP_MUL:
   case BINOP_DIV:
-    if (left_type != TYPE_i64 || right_type != TYPE_i64) {
-      sema_error(ctx, expr->loc, "Binary arithmetic operations require 'int' types");
+    if (!type_is_numeric(left_type) || !type_is_numeric(right_type)) {
+      sema_error(ctx, expr->loc, "Arithmetic operators require numeric operands");
       return TYPE_error;
     }
-    return TYPE_i64;
+
+    if (!type_equals(left_type, right_type)) {
+      sema_error(
+        ctx, expr->loc, "Operands must have identical types (got '%s' and '%s')", left_type->name, right_type->name);
+      return TYPE_error;
+    }
+
+    return left_type;
 
   case BINOP_EQEQ:
   case BINOP_NOT_EQ:
+    if (!type_is_comparable(left_type) || !type_is_comparable(right_type)) {
+      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", left_type->name);
+      return TYPE_error;
+    }
+
+    if (!type_equals(left_type, right_type)) {
+      sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
+      return TYPE_error;
+    }
+
+    return TYPE_bool;
+
   case BINOP_LESS:
   case BINOP_GREATER:
   case BINOP_LESS_EQ:
   case BINOP_GREATER_EQ:
-    if (left_type != right_type) {
-      sema_error(ctx, expr->loc, "Binary comparison operations require operands of the same type");
+    if (!type_is_orderable(left_type) || !type_is_orderable(right_type)) {
+      sema_error(ctx, expr->loc, "Comparisons require ordered types");
       return TYPE_error;
     }
+
+    if (!type_equals(left_type, right_type)) {
+      sema_error(ctx, expr->loc, "Cannot compare different types");
+      return TYPE_error;
+    }
+
     return TYPE_bool;
 
   case BINOP_COUNT:
