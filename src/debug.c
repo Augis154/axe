@@ -40,7 +40,7 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     return;
   }
 
-  switch (node->type) {
+  switch (node->kind) {
   case EXPR_LITERAL:
     switch (node->literal.type) {
     case LITERAL_INT:
@@ -99,7 +99,7 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
     return;
   }
 
-  switch (stmt->type) {
+  switch (stmt->kind) {
   case STMT_BLOCK:
     printf("Block Statement:\n");
     for (size_t i = 0; i < stmt->stmt_block.count; i++) {
@@ -172,7 +172,7 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
     return;
   }
 
-  switch (decl->type) {
+  switch (decl->kind) {
   case DECL_INVALID:
     printf("<invalid declaration node>\n");
     return;

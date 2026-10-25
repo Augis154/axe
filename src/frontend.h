@@ -66,8 +66,7 @@ typedef enum {
 
 typedef struct {
   TokenKind kind;
-
-  size_t line;
+  SourceLoc loc;
 
   const char *lexeme;
   size_t lexeme_len;
@@ -80,6 +79,8 @@ typedef struct {
 } Keyword;
 
 typedef struct {
+  const char *filename;
+
   const char *source_start;
   const char *source_end;
 

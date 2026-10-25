@@ -38,8 +38,9 @@ static void error_at(Parser *parser, Token token, const char *message) {
     return;
   }
   parser->panic_mode = true;
+  parser->comp_unit->had_error = true;
 
-  fprintf(stderr, "[line %zu] Error", token.line);
+  fprintf(stderr, "[line %zu] Error", token.loc.line);
 
   if (token.kind == TOKEN_EOF) {
     fprintf(stderr, " at end");
@@ -50,8 +51,6 @@ static void error_at(Parser *parser, Token token, const char *message) {
   }
 
   fprintf(stderr, ": %s\n", message);
-
-  parser->comp_unit->had_error = true;
 }
 
 static void advance(Parser *parser) {
@@ -105,7 +104,7 @@ static inline bool is_lvalue(const AstExpr *node) {
     return false;
   }
 
-  switch (node->type) {
+  switch (node->kind) {
   case EXPR_IDENTIFIER:
     return true;
   default:
@@ -148,6 +147,7 @@ static const UnaryOp get_unary_op(TokenKind kind) {
     return UNOP_NEGATE;
   case TOKEN_BANG:
     return UNOP_NOT;
+
   default:
     error_at(NULL, (Token){.kind = kind}, "Invalid unary operator.");
     return -1;
@@ -177,6 +177,7 @@ static const BinaryOp get_binary_op(TokenKind kind) {
     return BINOP_LESS_EQ;
   case TOKEN_GREATER_EQ:
     return BINOP_GREATER_EQ;
+
   default:
     error_at(NULL, (Token){.kind = kind}, "Invalid binary operator.");
     return -1;
@@ -186,10 +187,11 @@ static const BinaryOp get_binary_op(TokenKind kind) {
 static AstExpr *parse_int_literal(Parser *parser) {
   uint8_t base = 10;
 
-  const char *start = parser->current.lexeme;
-  const char *end = start + parser->current.lexeme_len;
+  Token token = parser->current;
+  const char *start = token.lexeme;
+  const char *end = start + token.lexeme_len;
 
-  if (parser->current.lexeme_len > 2 && start[0] == '0') {
+  if (token.lexeme_len > 2 && start[0] == '0') {
     if (start[1] == 'x' || start[1] == 'X') {
       base = 16;
       start += 2;
@@ -218,14 +220,14 @@ static AstExpr *parse_int_literal(Parser *parser) {
     }
 
     if (digit < 0 || digit >= base) {
-      error_at(parser, parser->current, "Invalid character in integer literal.");
+      error_at(parser, token, "Invalid character in integer literal.");
       return NULL;
     }
 
     value = value * base + digit;
   }
 
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_LITERAL);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_LITERAL, token.loc);
   expr->literal.type = LITERAL_INT;
   expr->literal.int_value = value;
 
@@ -233,7 +235,7 @@ static AstExpr *parse_int_literal(Parser *parser) {
 }
 
 static AstExpr *parse_float_literal(Parser *parser) {
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_LITERAL);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_LITERAL, parser->current.loc);
   expr->literal.type = LITERAL_FLOAT;
   expr->literal.float_value = strtod(parser->current.lexeme, NULL);
 
@@ -246,7 +248,7 @@ static AstExpr *parse_identifier(Parser *parser) {
     return NULL;
   }
 
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_IDENTIFIER);
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, EXPR_IDENTIFIER, parser->current.loc);
   expr->identifier.name = identifier_name;
 
   return expr;
@@ -265,10 +267,11 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
     error_at(parser, parser->current, "Invalid assignment target.");
     return NULL;
   }
+  SourceLoc start_loc = left->loc;
 
   AstExpr *right = parse_precedence(parser, PREC_ASSIGNMENT);
 
-  AstExpr *assign_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_ASSIGN);
+  AstExpr *assign_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_ASSIGN, start_loc);
   assign_expr->assignment.target = left;
   assign_expr->assignment.value = right;
 
@@ -276,12 +279,12 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
 }
 
 static AstExpr *parse_unary(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
   TokenKind operator = parser->current.kind;
-  const ParseRule *rule = get_rule(operator);
 
   AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
 
-  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_UNARY);
+  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_UNARY, start_loc);
   unary_expr->expr_unary.op = get_unary_op(operator);
   unary_expr->expr_unary.operand = op_expr;
 
@@ -289,12 +292,13 @@ static AstExpr *parse_unary(Parser *parser) {
 }
 
 static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
+  SourceLoc start_loc = parser->current.loc;
   TokenKind operator = parser->current.kind;
-  const ParseRule *rule = get_rule(operator);
 
+  const ParseRule *rule = get_rule(operator);
   AstExpr *right = parse_precedence(parser, rule->precedence + 1);
 
-  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_BINARY);
+  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_BINARY, start_loc);
   binary_expr->expr_binary.op = get_binary_op(operator);
   binary_expr->expr_binary.left = left;
   binary_expr->expr_binary.right = right;
@@ -305,6 +309,8 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 // Statement parsing functions
 
 static AstStmt *parse_block(Parser *parser) {
+  SourceLoc block_start = parser->current.loc;
+
   consume(parser, TOKEN_OBRACE, "Expected '{' to start block.");
 
   AstStmt **stmts = NULL;
@@ -318,7 +324,7 @@ static AstStmt *parse_block(Parser *parser) {
 
   consume(parser, TOKEN_CBRACE, "Expected '}' to end block.");
 
-  AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BLOCK);
+  AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BLOCK, block_start);
   AstStmtBlock *block = &block_stmt->stmt_block;
 
   block->count = da_len(stmts);
@@ -330,11 +336,13 @@ static AstStmt *parse_block(Parser *parser) {
 }
 
 static AstStmt *parse_expression_statement(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
   AstExpr *expr = parse_expression(parser);
 
   consume(parser, TOKEN_SEMICOLON, "Expected ';' after expression");
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_EXPRESSION);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_EXPRESSION, start_loc);
   stmt->stmt_expr.expression = expr;
 
   return stmt;
@@ -371,7 +379,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
     return NULL;
   }
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_VAR_DECL);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_VAR_DECL, name_token.loc);
   stmt->stmt_var_decl.name = var_name;
   stmt->stmt_var_decl.type = type_spec;
   stmt->stmt_var_decl.init = init_expr;
@@ -380,6 +388,8 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 }
 
 static AstStmt *parse_if_statement(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
   consume(parser, TOKEN_IF, "Expected 'if' keyword for if statement.");
 
   AstExpr *condition = parse_expression(parser);
@@ -391,7 +401,7 @@ static AstStmt *parse_if_statement(Parser *parser) {
     else_branch = parse_statement(parser);
   }
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_IF);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_IF, start_loc);
   stmt->stmt_if.condition = condition;
   stmt->stmt_if.then_branch = then_branch;
   stmt->stmt_if.else_branch = else_branch;
@@ -400,13 +410,15 @@ static AstStmt *parse_if_statement(Parser *parser) {
 }
 
 static AstStmt *parse_while_statement(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
   consume(parser, TOKEN_WHILE, "Expected 'while' keyword for while statement.");
 
   AstExpr *condition = parse_expression(parser);
 
   AstStmt *body = parse_block(parser);
 
-  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_WHILE);
+  AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_WHILE, start_loc);
   stmt->stmt_while.condition = condition;
   stmt->stmt_while.body = body;
 
@@ -418,6 +430,8 @@ static AstStmt *parse_while_statement(Parser *parser) {
 // Type parsing functions
 
 static AstType *parse_named_type(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
   consume(parser, TOKEN_IDENT, "Expected type name for named type.");
 
   const char *type_name = parse_identifier_name(parser, parser->current);
@@ -425,13 +439,15 @@ static AstType *parse_named_type(Parser *parser) {
     return NULL;
   }
 
-  AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_NAMED);
+  AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_NAMED, start_loc);
   type->named = type_name;
 
   return type;
 }
 
 static AstType *parse_pointer_type(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
   consume(parser, TOKEN_STAR, "Expected '*' for pointer type.");
 
   AstType *base_type = parse_type(parser);
@@ -439,7 +455,7 @@ static AstType *parse_pointer_type(Parser *parser) {
     return NULL;
   }
 
-  AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_POINTER);
+  AstType *type = ast_type_new(&parser->comp_unit->arena, TYPE_POINTER, start_loc);
   type->pointer.base = base_type;
 
   return type;

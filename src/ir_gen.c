@@ -162,7 +162,7 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
     return NULL_REG;
   }
 
-  switch (node->type) {
+  switch (node->kind) {
   case EXPR_LITERAL:
     return handle_literal(context, node);
 
@@ -178,11 +178,11 @@ static IrReg handle_expression(IrContext *context, AstExpr *node) {
     return handle_binary_op(context, node);
 
   case EXPR_INVALID:
-    fprintf(stderr, "handle_expression: encountered EXPR_INVALID node\n");
+    fprintf(stderr, "ir_handle_expression: encountered EXPR_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
-  fprintf(stderr, "gen_ir_expression: unhandled AST node type %d\n", node->type);
+  fprintf(stderr, "ir_handle_expression: unhandled AST node kind %d\n", node->kind);
   exit(EXIT_FAILURE);
 }
 
@@ -319,7 +319,7 @@ static void handle_statement(IrContext *context, AstStmt *stmt) {
     return;
   }
 
-  switch (stmt->type) {
+  switch (stmt->kind) {
   case STMT_BLOCK:
     return handle_stmt_block(context, stmt);
   case STMT_EXPRESSION:
@@ -333,11 +333,11 @@ static void handle_statement(IrContext *context, AstStmt *stmt) {
     return handle_stmt_while(context, stmt);
 
   case STMT_INVALID:
-    fprintf(stderr, "handle_statement: encountered STMT_INVALID node\n");
+    fprintf(stderr, "ir_handle_statement: encountered STMT_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
-  fprintf(stderr, "gen_ir_statement: unhandled AST statement type %d\n", stmt->type);
+  fprintf(stderr, "ir_handle_statement: unhandled AST statement kind %d\n", stmt->kind);
   exit(EXIT_FAILURE);
 }
 

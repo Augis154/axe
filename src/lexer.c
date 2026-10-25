@@ -84,7 +84,10 @@ static void begin_token(Lexer *lex) {
 static Token new_token(Lexer *lex, TokenKind kind) {
   Token token;
   token.kind = kind;
-  token.line = lex->line;
+
+  token.loc.filename = lex->filename;
+  token.loc.line = lex->line;
+
   token.lexeme = lex->token_start;
   token.lexeme_len = (size_t)(lex->current - lex->token_start);
   return token;
@@ -92,8 +95,11 @@ static Token new_token(Lexer *lex, TokenKind kind) {
 
 static Token error_token(Lexer *lex, const char *message) {
   Token token;
-  token.line = lex->line;
   token.kind = TOKEN_ERROR;
+
+  token.loc.filename = lex->filename;
+  token.loc.line = lex->line;
+
   token.lexeme = strdup(message);
   token.lexeme_len = strlen(message);
   return token;

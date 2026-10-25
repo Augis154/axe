@@ -15,15 +15,15 @@ TYPES_BUILTIN(TYPE_DEFINE)
 TYPES_BUILTIN(TYPE_PTRS)
 #undef TYPE_PTRS
 
-static void sema_error(SemaContext *ctx, const char *message, ...) {
+static void sema_error(SemaContext *ctx, SourceLoc loc, const char *message, ...) {
+  ctx->comp_unit->had_error = true;
+
   va_list args;
   va_start(args, message);
 
-  fprintf(stderr, "Sema error: ");
+  fprintf(stderr, "[line %zu] Error: ", loc.line);
   vfprintf(stderr, message, args);
   fprintf(stderr, "\n");
-
-  ctx->comp_unit->had_error = true;
 
   va_end(args);
 }
@@ -43,7 +43,7 @@ static Scope *scope_exit(Scope *current) {
   return current->parent;
 }
 
-static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind, Type *type) {
+static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind, Type *type, SourceLoc loc) {
   for (Symbol *sym = ctx->current_scope->symbols; sym != NULL; sym = sym->next) {
     if (sym->name == name) {
       return NULL;
@@ -55,6 +55,7 @@ static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind,
   sym->id = ctx->next_symbol_id++;
   sym->next = ctx->current_scope->symbols;
   sym->kind = kind;
+  sym->loc = loc;
   sym->type = type;
 
   ctx->current_scope->symbols = sym;
@@ -82,14 +83,18 @@ static Symbol *scope_lookup_current(Scope *current, const char *name) {
   return NULL;
 }
 
-static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type) {
+static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type, SourceLoc loc) {
   Symbol *existing = scope_lookup_current(ctx->current_scope, name);
   if (existing) {
-    sema_error(ctx, "Redeclaration of type '%s' in current scope", name);
+    sema_error(ctx,
+               loc,
+               "Redeclaration of type '%s' in current scope. Previous declaration at line %zu",
+               name,
+               existing->loc.line);
     return NULL;
   }
 
-  return scope_insert(ctx, name, SYMBOL_TYPE, type);
+  return scope_insert(ctx, name, SYMBOL_TYPE, type, loc);
 }
 
 // Expression semantic analysis functions
@@ -103,19 +108,21 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
 
   case LITERAL_CHAR:
   case LITERAL_STRING:
-    sema_error(ctx, "Literal type not yet supported in semantic analysis");
-    return TYPE_void;
+    sema_error(ctx, expr->loc, "Literal type not yet supported in semantic analysis");
+    return TYPE_error;
   }
 
-  sema_error(ctx, "Unknown literal type");
-  return TYPE_void;
+  sema_error(ctx, expr->loc, "Unknown literal type");
+  return TYPE_error;
 }
 
 static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   Symbol *sym = scope_lookup(ctx->current_scope, expr->identifier.name);
   if (!sym) {
-    sema_error(ctx, "Undefined identifier '%s'", expr->identifier.name);
-    return TYPE_void;
+    sema_error(ctx, expr->loc, "Undefined identifier '%s'", expr->identifier.name);
+
+    scope_insert(ctx, expr->identifier.name, SYMBOL_LOCAL_VAR, TYPE_error, expr->loc);
+    return TYPE_error;
   }
 
   return sym->type;
@@ -125,9 +132,13 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   Type *target_type = sema_expr(ctx, expr->assignment.target);
   Type *value_type = sema_expr(ctx, expr->assignment.value);
 
+  if (target_type == TYPE_error || value_type == TYPE_error) {
+    return TYPE_error;
+  }
+
   if (target_type != value_type) {
-    sema_error(ctx, "Type mismatch in assignment");
-    return TYPE_void;
+    sema_error(ctx, expr->loc, "Type mismatch in assignment");
+    return TYPE_error;
   }
 
   return target_type;
@@ -136,35 +147,39 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
 static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
   Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
 
+  if (operand_type == TYPE_error) {
+    return TYPE_error;
+  }
+
   switch (expr->expr_unary.op) {
   case UNOP_NEGATE:
     if (operand_type != TYPE_i64) {
-      sema_error(ctx, "Unary '-' operator requires 'int' type");
-      return TYPE_void;
+      sema_error(ctx, expr->loc, "Unary '-' operator requires 'int' type");
+      return TYPE_error;
     }
     return operand_type;
   case UNOP_NOT:
     if (operand_type != TYPE_bool) {
-      sema_error(ctx, "Unary '!' operator requires 'bool' type");
-      return TYPE_void;
+      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
+      return TYPE_error;
     }
     return operand_type;
 
   case UNOP_COUNT:
-    sema_error(ctx, "Invalid unary operator");
-    return TYPE_void;
+    sema_error(ctx, expr->loc, "Invalid unary operator");
+    return TYPE_error;
   }
 
-  sema_error(ctx, "Unknown unary operator");
-  return TYPE_void;
+  sema_error(ctx, expr->loc, "Unknown unary operator");
+  return TYPE_error;
 }
 
 static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   Type *left_type = sema_expr(ctx, expr->expr_binary.left);
   Type *right_type = sema_expr(ctx, expr->expr_binary.right);
 
-  if (left_type == TYPE_void || right_type == TYPE_void) {
-    return TYPE_void;
+  if (left_type == TYPE_error || right_type == TYPE_error) {
+    return TYPE_error;
   }
 
   switch (expr->expr_binary.op) {
@@ -173,8 +188,8 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_MUL:
   case BINOP_DIV:
     if (left_type != TYPE_i64 || right_type != TYPE_i64) {
-      sema_error(ctx, "Binary arithmetic operations require 'int' types");
-      return TYPE_void;
+      sema_error(ctx, expr->loc, "Binary arithmetic operations require 'int' types");
+      return TYPE_error;
     }
     return TYPE_i64;
 
@@ -185,18 +200,18 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_LESS_EQ:
   case BINOP_GREATER_EQ:
     if (left_type != right_type) {
-      sema_error(ctx, "Binary comparison operations require operands of the same type");
-      return TYPE_void;
+      sema_error(ctx, expr->loc, "Binary comparison operations require operands of the same type");
+      return TYPE_error;
     }
     return TYPE_bool;
 
   case BINOP_COUNT:
-    sema_error(ctx, "Invalid binary operator");
-    return TYPE_void;
+    sema_error(ctx, expr->loc, "Invalid binary operator");
+    return TYPE_error;
   }
 
-  sema_error(ctx, "Unknown binary operator");
-  return TYPE_void;
+  sema_error(ctx, expr->loc, "Unknown binary operator");
+  return TYPE_error;
 }
 
 // Statement semantic analysis functions
@@ -227,19 +242,19 @@ static void sema_stmt_var_decl(SemaContext *ctx, AstStmt *stmt) {
   }
 
   if (expected_type && init_type && expected_type != init_type) {
-    sema_error(ctx, "Variable '%s' declared type does not match initializer type", stmt->stmt_var_decl.name);
+    sema_error(ctx, stmt->loc, "Variable '%s' declared type does not match initializer type", stmt->stmt_var_decl.name);
     return;
   }
 
   Type *var_type = expected_type ? expected_type : init_type;
   if (!var_type) {
-    sema_error(ctx, "Cannot infer type without explicit type or initializer");
-    var_type = TYPE_void;
+    sema_error(ctx, stmt->loc, "Cannot infer type without explicit type or initializer");
+    var_type = TYPE_error;
   }
 
-  Symbol *sym = scope_insert(ctx, stmt->stmt_var_decl.name, SYMBOL_LOCAL_VAR, var_type);
+  Symbol *sym = scope_insert(ctx, stmt->stmt_var_decl.name, SYMBOL_LOCAL_VAR, var_type, stmt->loc);
   if (!sym) {
-    sema_error(ctx, "Redeclaration of '%s' in current scope", stmt->stmt_var_decl.name);
+    sema_error(ctx, stmt->loc, "Redeclaration of '%s' in current scope", stmt->stmt_var_decl.name);
     return;
   }
 }
@@ -247,7 +262,7 @@ static void sema_stmt_var_decl(SemaContext *ctx, AstStmt *stmt) {
 static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_if.condition);
   if (cond_type != TYPE_bool) {
-    sema_error(ctx, "Condition in 'if' must be of type 'bool'");
+    sema_error(ctx, stmt->stmt_if.condition->loc, "Condition in 'if' must be of type 'bool'");
   }
 
   sema_stmt(ctx, stmt->stmt_if.then_branch);
@@ -259,7 +274,7 @@ static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
 static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_while.condition);
   if (cond_type != TYPE_bool) {
-    sema_error(ctx, "Condition in 'while' must be of type 'bool'");
+    sema_error(ctx, stmt->stmt_while.condition->loc, "Condition in 'while' must be of type 'bool'");
   }
 
   sema_stmt(ctx, stmt->stmt_while.body);
@@ -269,14 +284,14 @@ static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
 
 static Type *sema_type_named(SemaContext *ctx, AstType *type) {
   if (!type->named) {
-    sema_error(ctx, "Named type must have a name");
-    return TYPE_void;
+    sema_error(ctx, type->loc, "Named type must have a name");
+    return TYPE_error;
   }
 
   Symbol *sym = scope_lookup(ctx->current_scope, type->named);
   if (!sym || sym->kind != SYMBOL_TYPE) {
-    sema_error(ctx, "Undefined type '%s'", type->named);
-    return TYPE_void;
+    sema_error(ctx, type->loc, "Undefined type '%s'", type->named);
+    return TYPE_error;
   }
 
   return sym->type;
@@ -285,7 +300,7 @@ static Type *sema_type_named(SemaContext *ctx, AstType *type) {
 // Semantic analysis functions
 
 static void sema_init_builtins(SemaContext *ctx) {
-#define TYPE_DEFINE(kind, size, ident) scope_insert_type(ctx, #ident, TYPE_##ident);
+#define TYPE_DEFINE(kind, size, ident) scope_insert_type(ctx, #ident, TYPE_##ident, (SourceLoc){0});
   TYPES_BUILTIN(TYPE_DEFINE)
 #undef TYPE_DEFINE
 }
@@ -311,7 +326,7 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 
   Type *result_type = NULL;
 
-  switch (expr->type) {
+  switch (expr->kind) {
   case EXPR_LITERAL:
     result_type = sema_expr_literal(ctx, expr);
     break;
@@ -332,12 +347,12 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
     break;
 
   case EXPR_INVALID:
-    return TYPE_void;
+    return TYPE_error;
   }
 
   if (!result_type) {
-    sema_error(ctx, "Failed to determine type for expression");
-    return TYPE_void;
+    sema_error(ctx, expr->loc, "Failed to determine type for expression");
+    return TYPE_error;
   }
 
   ctx->expr_types[expr->id] = result_type;
@@ -346,7 +361,7 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 }
 
 void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
-  switch (stmt->type) {
+  switch (stmt->kind) {
   case STMT_BLOCK:
     sema_stmt_block(ctx, stmt);
     return;
@@ -365,11 +380,11 @@ void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
     return;
 
   case STMT_INVALID:
-    sema_error(ctx, "Invalid statement");
+    sema_error(ctx, stmt->loc, "Invalid statement");
     return;
   }
 
-  sema_error(ctx, "Unknown statement type");
+  sema_error(ctx, stmt->loc, "Unknown statement type");
 }
 
 Type *sema_type(SemaContext *ctx, AstType *type) {
@@ -384,6 +399,6 @@ Type *sema_type(SemaContext *ctx, AstType *type) {
     return TYPE_void;
   }
 
-  sema_error(ctx, "Unknown type kind");
-  return TYPE_void;
+  sema_error(ctx, type->loc, "Unknown type kind");
+  return TYPE_error;
 }
