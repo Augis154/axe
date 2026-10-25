@@ -266,18 +266,30 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
 }
 
 static AstExpr *parse_call(Parser *parser, AstExpr *left) {
-  size_t arg_count = 0;
+  AstExpr **args = NULL;
+  while (!check(parser, TOKEN_CPAREN) && !check(parser, TOKEN_EOF)) {
+    AstExpr *arg = parse_expression(parser);
+    if (arg) {
+      da_append(args, arg);
+    }
 
-  if (check(parser, TOKEN_OPAREN)) {
-    // TODO: Parse arguments for the function call
+    if (!match(parser, TOKEN_COMMA)) {
+      break;
+    }
   }
 
-  consume(parser, TOKEN_CPAREN, "Expected ')' after function call");
+  consume(parser, TOKEN_CPAREN, "Expected ')' after function arguments.");
 
   AstExpr *call_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_CALL, left->loc);
   call_expr->expr_call.callee = left;
-  call_expr->expr_call.arguments = NULL;
-  call_expr->expr_call.argument_count = arg_count;
+
+  AstExpr **arg_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstExpr *) * da_len(args));
+  memcpy(arg_array, args, sizeof(AstExpr *) * da_len(args));
+
+  call_expr->expr_call.arguments = arg_array;
+  call_expr->expr_call.argument_count = da_len(args);
+
+  da_free(args);
 
   return call_expr;
 }
@@ -330,10 +342,10 @@ static AstStmt *parse_block(Parser *parser) {
 
   AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BLOCK, block_start);
 
-  AstStmt **block_stmts = arena_alloc(&parser->comp_unit->arena, sizeof(AstStmt *) * da_len(stmts));
-  memcpy(block_stmts, stmts, sizeof(AstStmt *) * da_len(stmts));
+  AstStmt **stmt_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstStmt *) * da_len(stmts));
+  memcpy(stmt_array, stmts, sizeof(AstStmt *) * da_len(stmts));
 
-  block_stmt->stmt_block.statements = block_stmts;
+  block_stmt->stmt_block.statements = stmt_array;
   block_stmt->stmt_block.count = da_len(stmts);
   da_free(stmts);
 
@@ -486,7 +498,35 @@ static AstDecl *parse_function_declaration(Parser *parser) {
   if (!func_name) return NULL;
 
   consume(parser, TOKEN_OPAREN, "Expected '(' after function name.");
-  // TODO: Parse function parameters
+
+  AstFuncParam *params = NULL;
+
+  while (!check(parser, TOKEN_CPAREN) && !check(parser, TOKEN_EOF)) {
+    SourceLoc param_loc = parser->current.loc;
+
+    consume(parser, TOKEN_IDENT, "Expected parameter name in function declaration.");
+    const char *param_name = parse_identifier_name(parser, parser->current);
+    if (!param_name) return NULL;
+
+    consume(parser, TOKEN_COLON, "Expected ':' after parameter name.");
+    AstType *param_type = parse_type(parser);
+    if (!param_type) {
+      error_at(parser, parser->current, "Expected type for parameter.");
+      return NULL;
+    }
+
+    AstFuncParam param = {
+      .name = param_name,
+      .type = param_type,
+      .loc = param_loc,
+    };
+    da_append(params, param);
+
+    if (!match(parser, TOKEN_COMMA)) {
+      break;
+    }
+  }
+
   consume(parser, TOKEN_CPAREN, "Expected ')' after function parameters.");
 
   AstType *return_type = NULL;
@@ -504,8 +544,12 @@ static AstDecl *parse_function_declaration(Parser *parser) {
   decl->decl_function.name = func_name;
   decl->decl_function.body = func_body;
   decl->decl_function.return_type = return_type;
-  // decl->decl_function.param_types = NULL; // TODO: Set parameter types
-  // decl->decl_function.param_count = 0;    // TODO: Set parameter count
+
+  AstFuncParam *param_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstFuncParam) * da_len(params));
+  memcpy(param_array, params, sizeof(AstFuncParam) * da_len(params));
+  decl->decl_function.params = param_array;
+  decl->decl_function.param_count = da_len(params);
+  da_free(params);
 
   return decl;
 }
@@ -620,10 +664,10 @@ AstProgram *parse_program(Parser *parser) {
 
   AstProgram *program = arena_alloc(&parser->comp_unit->arena, sizeof(AstProgram));
 
-  AstDecl **prog_decls = arena_alloc(&parser->comp_unit->arena, sizeof(AstDecl *) * da_len(decls));
-  memcpy(prog_decls, decls, sizeof(AstDecl *) * da_len(decls));
+  AstDecl **decl_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstDecl *) * da_len(decls));
+  memcpy(decl_array, decls, sizeof(AstDecl *) * da_len(decls));
 
-  program->decls = prog_decls;
+  program->decls = decl_array;
   program->decl_count = da_len(decls);
 
   da_free(decls);

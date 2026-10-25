@@ -136,6 +136,7 @@ typedef struct {
   const char *name;
   AstType *type;
   AstExpr *init;
+  Symbol *symbol;
 } AstStmtVarDecl;
 
 typedef struct {
@@ -179,9 +180,19 @@ typedef enum {
 
 typedef struct {
   const char *name;
+  SourceLoc loc;
+  AstType *type;
+  Symbol *symbol;
+} AstFuncParam;
+
+typedef struct {
+  const char *name;
 
   AstType *return_type;
   AstStmt *body;
+
+  AstFuncParam *params;
+  size_t param_count;
 
   Symbol *symbol;
 } AstDeclFunction;

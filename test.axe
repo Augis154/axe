@@ -1,9 +1,15 @@
-fn foo(): i64 {
-  var a = 1;
-  return a + 2;
+fn foo() {
+  return;
+}
+
+fn fib(n: i64): i64 {
+  if n <= 1 {
+    return n;
+  }
+  return fib(n - 1) + fib(n - 2);
 }
 
 fn main(): i64 {
-  var a = foo();
-  return a;
+  foo();
+  return fib(7); # 13
 }

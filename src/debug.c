@@ -288,7 +288,14 @@ void debug_print_ir_function(IrFunction *ir_func) {
       continue;
 
     case IR_INST_CALL:
-      printf("%zu: CALL r%u, %s\n", i, inst->res.id, inst->var_name);
+      printf("%zu: CALL r%u, %s(", i, inst->res.id, inst->var_name);
+      for (size_t j = 0; j < inst->call.arg_count; j++) {
+        printf("r%u", inst->call.args[j].reg.id);
+        if (j < inst->call.arg_count - 1) {
+          printf(", ");
+        }
+      }
+      printf(")\n");
       continue;
     case IR_INST_RETURN:
       printf("%zu: RETURN r%u\n", i, inst->arg1.id);

@@ -193,6 +193,8 @@ Token lexer_get_token(Lexer *lex) {
   char c = advance(lex);
 
   switch (c) {
+  case ',':
+    return new_token(lex, TOKEN_COMMA);
   case ':':
     return new_token(lex, TOKEN_COLON);
   case ';':

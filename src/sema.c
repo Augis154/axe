@@ -1,5 +1,6 @@
 #include "sema.h"
 
+#include "ast.h"
 #include "lib/arena.h"
 #include "lib/str_table.h"
 #include "types.h"
@@ -37,14 +38,16 @@ static Scope *scope_exit(Scope *current) {
 }
 
 static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind, Type *type, SourceLoc loc) {
+  const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
+
   for (Symbol *sym = ctx->current_scope->symbols; sym != NULL; sym = sym->next) {
-    if (sym->name == name) {
+    if (sym->name == interned_name) {
       return NULL;
     }
   }
 
   Symbol *sym = arena_alloc(&ctx->comp_unit->arena, sizeof(Symbol));
-  sym->name = st_intern(&ctx->comp_unit->intern_table, name);
+  sym->name = interned_name;
   sym->id = ctx->next_symbol_id++;
   sym->next = ctx->current_scope->symbols;
   sym->kind = kind;
@@ -55,10 +58,12 @@ static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind,
   return sym;
 }
 
-static Symbol *scope_lookup(Scope *current, const char *name) {
-  for (Scope *sc = current; sc != NULL; sc = sc->parent) {
+static Symbol *scope_lookup(SemaContext *ctx, const char *name) {
+  const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
+
+  for (Scope *sc = ctx->current_scope; sc != NULL; sc = sc->parent) {
     for (Symbol *sym = sc->symbols; sym != NULL; sym = sym->next) {
-      if (sym->name == name) {
+      if (sym->name == interned_name) {
         return sym;
       }
     }
@@ -67,9 +72,11 @@ static Symbol *scope_lookup(Scope *current, const char *name) {
   return NULL;
 }
 
-static Symbol *scope_lookup_current(Scope *current, const char *name) {
-  for (Symbol *sym = current->symbols; sym != NULL; sym = sym->next) {
-    if (sym->name == name) {
+static Symbol *scope_lookup_current(SemaContext *ctx, const char *name) {
+  const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
+
+  for (Symbol *sym = ctx->current_scope->symbols; sym != NULL; sym = sym->next) {
+    if (sym->name == interned_name) {
       return sym;
     }
   }
@@ -77,7 +84,7 @@ static Symbol *scope_lookup_current(Scope *current, const char *name) {
 }
 
 static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type, SourceLoc loc) {
-  Symbol *existing = scope_lookup_current(ctx->current_scope, name);
+  Symbol *existing = scope_lookup_current(ctx, name);
   if (existing) {
     sema_error(ctx,
                loc,
@@ -110,7 +117,7 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
 }
 
 static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
-  Symbol *sym = scope_lookup(ctx->current_scope, expr->identifier.name);
+  Symbol *sym = scope_lookup(ctx, expr->identifier.name);
   if (sym) return sym->type;
 
   sema_error(ctx, expr->loc, "Undefined identifier '%s'", expr->identifier.name);
@@ -143,7 +150,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     return TYPE_error;
   }
 
-  Symbol *sym = scope_lookup(ctx->current_scope, callee->identifier.name);
+  Symbol *sym = scope_lookup(ctx, callee->identifier.name);
 
   if (!sym) {
     sema_error(ctx, expr->loc, "Undefined function '%s'", callee->identifier.name);
@@ -155,7 +162,41 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     return TYPE_error;
   }
 
-  return sym->type;
+  TypeFunction *func_type = &sym->type->function;
+
+  if (expr->expr_call.argument_count != func_type->param_count) {
+    sema_error(ctx,
+               expr->loc,
+               "Function '%s' expects %zu arguments, but %zu were provided",
+               callee->identifier.name,
+               sym->type->function.param_count,
+               expr->expr_call.argument_count);
+    return TYPE_error;
+  }
+
+  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+    AstExpr *arg_expr = expr->expr_call.arguments[i];
+    Type *arg_type = sema_expr(ctx, arg_expr);
+
+    if (arg_type == TYPE_error) {
+      return TYPE_error;
+    }
+
+    Type *expected_type = func_type->param_types[i];
+
+    if (arg_type != expected_type) {
+      sema_error(ctx,
+                 arg_expr->loc,
+                 "Argument %zu of function '%s' expects type '%s', but got '%s'",
+                 i + 1,
+                 callee->identifier.name,
+                 expected_type->name,
+                 arg_type->name);
+      return TYPE_error;
+    }
+  }
+
+  return func_type->return_type;
 }
 
 static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
@@ -256,6 +297,50 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   return TYPE_error;
 }
 
+Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
+  if (!expr) {
+    return TYPE_void;
+  }
+
+  Type *result_type = NULL;
+
+  switch (expr->kind) {
+  case EXPR_LITERAL:
+    result_type = sema_expr_literal(ctx, expr);
+    break;
+
+  case EXPR_IDENTIFIER:
+    result_type = sema_expr_identifier(ctx, expr);
+    break;
+
+  case EXPR_ASSIGN:
+    result_type = sema_expr_assignment(ctx, expr);
+    break;
+  case EXPR_CALL:
+    result_type = sema_expr_call(ctx, expr);
+    break;
+
+  case EXPR_UNARY:
+    result_type = sema_expr_unary(ctx, expr);
+    break;
+  case EXPR_BINARY:
+    result_type = sema_expr_binary(ctx, expr);
+    break;
+
+  case EXPR_INVALID:
+    return TYPE_error;
+  }
+
+  if (!result_type) {
+    sema_error(ctx, expr->loc, "Failed to determine type for expression");
+    return TYPE_error;
+  }
+
+  ctx->expr_types[expr->id] = result_type;
+
+  return result_type;
+}
+
 // Statement semantic analysis functions
 
 static void sema_stmt_block(SemaContext *ctx, AstStmt *stmt) {
@@ -299,6 +384,8 @@ static void sema_stmt_var_decl(SemaContext *ctx, AstStmt *stmt) {
     sema_error(ctx, stmt->loc, "Redeclaration of '%s' in current scope", stmt->stmt_var_decl.name);
     return;
   }
+
+  stmt->stmt_var_decl.symbol = sym;
 }
 
 static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
@@ -307,7 +394,7 @@ static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
     return;
   }
 
-  Type *expected_type = ctx->current_function->symbol->type;
+  Type *expected_type = ctx->current_function->symbol->type->function.return_type;
   Type *actual_type = TYPE_void;
 
   if (stmt->stmt_return.value) {
@@ -359,119 +446,6 @@ static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
   ctx->loop_depth--;
 }
 
-// Declaration semantic analysis functions
-
-static void sema_decl_function(SemaContext *ctx, AstDecl *decl) {
-  Type *return_type = sema_type(ctx, decl->decl_function.return_type);
-  if (return_type == TYPE_error) {
-    sema_error(ctx, decl->loc, "Invalid return type for function '%s'", decl->decl_function.name);
-    return;
-  }
-
-  Symbol *sym = scope_insert(ctx, decl->decl_function.name, SYMBOL_FUNCTION, return_type, decl->loc);
-  if (!sym) {
-    sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", decl->decl_function.name);
-    return;
-  }
-
-  AstDeclFunction *prev_func = ctx->current_function;
-  ctx->current_function = &decl->decl_function;
-  ctx->current_function->symbol = sym;
-
-  ctx->current_scope = scope_enter(ctx, ctx->current_scope);
-
-  // TODO: Handle function parameters and their types
-
-  sema_stmt(ctx, decl->decl_function.body);
-
-  ctx->current_scope = scope_exit(ctx->current_scope);
-  ctx->current_function = prev_func;
-}
-
-// Type semantic analysis functions
-
-static Type *sema_type_named(SemaContext *ctx, AstType *type) {
-  if (!type->named) {
-    sema_error(ctx, type->loc, "Named type must have a name");
-    return TYPE_error;
-  }
-
-  Symbol *sym = scope_lookup(ctx->current_scope, type->named);
-  if (!sym || sym->kind != SYMBOL_TYPE) {
-    sema_error(ctx, type->loc, "Undefined type '%s'", type->named);
-    return TYPE_error;
-  }
-
-  return sym->type;
-}
-
-// Semantic analysis functions
-
-static void sema_init_builtins(SemaContext *ctx) {
-#define TYPE_DEFINE(kind, size, ident) scope_insert_type(ctx, #ident, TYPE_##ident, (SourceLoc){0});
-  TYPES_BUILTIN(TYPE_DEFINE)
-#undef TYPE_DEFINE
-}
-
-void sema_init(SemaContext *ctx, CompilationUnit *comp_unit) {
-  ctx->comp_unit = comp_unit;
-  ctx->current_scope = scope_enter(ctx, NULL);
-  ctx->next_symbol_id = 1;
-  ctx->loop_depth = 0;
-
-  uint32_t expr_count = ast_expr_count();
-  ctx->expr_types = arena_alloc(&comp_unit->arena, sizeof(Type *) * expr_count);
-  for (size_t i = 0; i < expr_count; i++) {
-    ctx->expr_types[i] = TYPE_void;
-  }
-
-  sema_init_builtins(ctx);
-}
-
-Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
-  if (!expr) {
-    return TYPE_void;
-  }
-
-  Type *result_type = NULL;
-
-  switch (expr->kind) {
-  case EXPR_LITERAL:
-    result_type = sema_expr_literal(ctx, expr);
-    break;
-
-  case EXPR_IDENTIFIER:
-    result_type = sema_expr_identifier(ctx, expr);
-    break;
-
-  case EXPR_ASSIGN:
-    result_type = sema_expr_assignment(ctx, expr);
-    break;
-  case EXPR_CALL:
-    result_type = sema_expr_call(ctx, expr);
-    break;
-
-  case EXPR_UNARY:
-    result_type = sema_expr_unary(ctx, expr);
-    break;
-  case EXPR_BINARY:
-    result_type = sema_expr_binary(ctx, expr);
-    break;
-
-  case EXPR_INVALID:
-    return TYPE_error;
-  }
-
-  if (!result_type) {
-    sema_error(ctx, expr->loc, "Failed to determine type for expression");
-    return TYPE_error;
-  }
-
-  ctx->expr_types[expr->id] = result_type;
-
-  return result_type;
-}
-
 void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
   switch (stmt->kind) {
   case STMT_BLOCK:
@@ -500,10 +474,104 @@ void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
   sema_error(ctx, stmt->loc, "Unknown statement type");
 }
 
-void sema_decl(SemaContext *ctx, AstDecl *decl) {
+// Declaration semantic analysis functions
+
+// Pass 1: Symbol discovery
+
+static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
+  const char *func_name = decl->decl_function.name;
+
+  Type *return_type = sema_type(ctx, decl->decl_function.return_type);
+  if (return_type == TYPE_error) {
+    sema_error(ctx, decl->loc, "Invalid return type for function '%s'", func_name);
+    return;
+  }
+
+  uint32_t param_count = decl->decl_function.param_count;
+  Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * param_count);
+
+  for (uint32_t i = 0; i < param_count; i++) {
+    AstFuncParam *param = &decl->decl_function.params[i];
+    Type *param_type = sema_type(ctx, param->type);
+
+    if (param_type == TYPE_error) {
+      sema_error(ctx, param->loc, "Invalid type for '%s' in function '%s'", param->name, func_name);
+      return;
+    }
+
+    param_types[i] = param_type;
+  }
+
+  Type *func_type = arena_alloc(&ctx->comp_unit->arena, sizeof(Type));
+  func_type->kind = TYPE_FUNCTION;
+
+  func_type->function.return_type = return_type;
+  func_type->function.param_count = decl->decl_function.param_count;
+  func_type->function.param_types = param_types;
+
+  Symbol *sym = scope_insert(ctx, func_name, SYMBOL_FUNCTION, func_type, decl->loc);
+  if (!sym) {
+    sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", func_name);
+    return;
+  }
+
+  sym->type = func_type;
+  decl->decl_function.symbol = sym;
+}
+
+static void sema_pass1_decl(SemaContext *ctx, AstDecl *decl) {
+  switch (decl->kind) {
+  case DECL_FUNCTION:
+    sema_pass1_decl_function(ctx, decl);
+    break;
+
+  case DECL_INVALID:
+    sema_error(ctx, decl->loc, "Invalid declaration");
+    break;
+  }
+}
+
+// Pass 2: Type checking and validation
+
+static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
+  if (!decl->decl_function.symbol) {
+    sema_error(ctx, decl->loc, "Function '%s' has no symbol associated with it", decl->decl_function.name);
+    return;
+  }
+
+  AstDeclFunction *func = &decl->decl_function;
+  AstDeclFunction *prev_func = ctx->current_function;
+
+  ctx->current_function = func;
+  ctx->current_scope = scope_enter(ctx, ctx->current_scope);
+
+  Type *func_type = func->symbol->type;
+
+  for (uint32_t i = 0; i < func->param_count; i++) {
+    AstFuncParam *param = &func->params[i];
+    Type *type = func_type->function.param_types[i];
+    Symbol *sym = scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, type, param->loc);
+
+    if (!sym) {
+      sema_error(ctx, param->loc, "Redeclaration of parameter '%s' in function '%s'", param->name, func->name);
+      continue;
+    }
+
+    param->symbol = sym;
+  }
+
+  if (func->body) {
+    sema_stmt(ctx, decl->decl_function.body);
+  }
+
+  ctx->current_scope = scope_exit(ctx->current_scope);
+  ctx->current_function = prev_func;
+}
+
+void sema_pass2_decl(SemaContext *ctx, AstDecl *decl) {
   switch (decl->kind) {
   case DECL_FUNCTION: {
-    return sema_decl_function(ctx, decl);
+    return sema_pass2_decl_function(ctx, decl);
   }
 
   case DECL_INVALID:
@@ -511,6 +579,23 @@ void sema_decl(SemaContext *ctx, AstDecl *decl) {
   }
 
   sema_error(ctx, decl->loc, "Unknown declaration type");
+}
+
+// Type semantic analysis functions
+
+static Type *sema_type_named(SemaContext *ctx, AstType *type) {
+  if (!type->named) {
+    sema_error(ctx, type->loc, "Named type must have a name");
+    return TYPE_error;
+  }
+
+  Symbol *sym = scope_lookup(ctx, type->named);
+  if (!sym || sym->kind != SYMBOL_TYPE) {
+    sema_error(ctx, type->loc, "Undefined type '%s'", type->named);
+    return TYPE_error;
+  }
+
+  return sym->type;
 }
 
 Type *sema_type(SemaContext *ctx, AstType *type) {
@@ -529,8 +614,39 @@ Type *sema_type(SemaContext *ctx, AstType *type) {
   return TYPE_error;
 }
 
+// Semantic analysis functions
+
+static void sema_init_builtins(SemaContext *ctx) {
+#define TYPE_DEFINE(kind, size, ident) scope_insert_type(ctx, #ident, TYPE_##ident, (SourceLoc){0});
+  TYPES_BUILTIN(TYPE_DEFINE)
+#undef TYPE_DEFINE
+}
+
+void sema_init(SemaContext *ctx, CompilationUnit *comp_unit) {
+  ctx->comp_unit = comp_unit;
+  ctx->current_scope = scope_enter(ctx, NULL);
+  ctx->next_symbol_id = 1;
+  ctx->loop_depth = 0;
+
+  uint32_t expr_count = ast_expr_count();
+  ctx->expr_types = arena_alloc(&comp_unit->arena, sizeof(Type *) * expr_count);
+  for (size_t i = 0; i < expr_count; i++) {
+    ctx->expr_types[i] = TYPE_void;
+  }
+
+  sema_init_builtins(ctx);
+}
+
 void sema_program(SemaContext *ctx, AstProgram *program) {
   for (size_t i = 0; i < program->decl_count; i++) {
-    sema_decl(ctx, program->decls[i]);
+    sema_pass1_decl(ctx, program->decls[i]);
+  }
+
+  if (ctx->comp_unit->had_error) {
+    return;
+  }
+
+  for (size_t i = 0; i < program->decl_count; i++) {
+    sema_pass2_decl(ctx, program->decls[i]);
   }
 }
