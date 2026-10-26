@@ -1,8 +1,10 @@
 #include "gen_qbe.h"
 
+#include "common.h"
 #include "ir.h"
 #include "lib/array.h"
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -26,9 +28,7 @@ static char qbe_type_char(IrType type) {
 }
 
 static inline char reg_type_char(const IrFunction *fn, IrReg reg) {
-  if (reg.id == NULL_REG.id || reg.id >= da_len(fn->reg_types)) {
-    return 'w';
-  }
+  assert(reg.id != NULL_REG.id && reg.id < da_len(fn->reg_types) && "register without a recorded type");
   return qbe_type_char(fn->reg_types[reg.id]);
 }
 
@@ -206,8 +206,7 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
     return;
   }
 
-  fprintf(stderr, "emit_ir_instr: unhandled IR opcode %d\n", instr.op);
-  assert(false);
+  UNREACHABLE("unhandled IR opcode");
 }
 
 static void qbe_write_function(FILE *file, const IrFunction *function) {

@@ -1,14 +1,14 @@
 #include "gen_ir.h"
+
+#include "common.h"
 #include "lib/array.h"
 #include "sema.h"
 #include "types.h"
 
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 static IrType get_ir_type(Type *type) {
-  if (!type) return IR_TYPE_I32;
+  assert(type && "expression has no type; sema did not analyse it");
 
   switch (type->kind) {
   case TYPE_KIND_I32:
@@ -124,12 +124,10 @@ static IrOp get_unary_ir_op(UnaryOp op) {
     return IR_OP_NOT;
 
   case UNOP_COUNT:
-    fprintf(stderr, "get_unary_ir_op: UNOP_COUNT is not a valid operator\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("UNOP_COUNT is not a valid operator");
   }
 
-  fprintf(stderr, "get_unary_ir_op: unhandled UNOP %d\n", op);
-  exit(EXIT_FAILURE);
+  UNREACHABLE("unhandled unary operator");
 }
 
 static IrOp get_binary_ir_op(BinaryOp op) {
@@ -157,12 +155,10 @@ static IrOp get_binary_ir_op(BinaryOp op) {
     return IR_OP_CMP_GE;
 
   case BINOP_COUNT:
-    fprintf(stderr, "get_binary_ir_op: BINOP_COUNT is not a valid operator\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("BINOP_COUNT is not a valid operator");
   }
 
-  fprintf(stderr, "get_binary_ir_op: unhandled BINOP %d\n", op);
-  exit(EXIT_FAILURE);
+  UNREACHABLE("unhandled binary operator");
 }
 
 static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
@@ -175,11 +171,9 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
   case AST_LITERAL_FLOAT:
     break;
   case AST_LITERAL_CHAR:
-    fprintf(stderr, "emit_literal: char literals not yet supported in IR generation\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("sema rejects char literals");
   case AST_LITERAL_STRING:
-    fprintf(stderr, "emit_literal: string literals not yet supported in IR generation\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("sema rejects string literals");
   }
 
   Type *type = expr_type(ctx, node);
@@ -338,12 +332,10 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *node) {
     return emit_cast(ctx, node);
 
   case AST_EXPR_INVALID:
-    fprintf(stderr, "ir_emit_expression: encountered AST_EXPR_INVALID node\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("AST_EXPR_INVALID reached IR generation");
   }
 
-  fprintf(stderr, "ir_emit_expression: unhandled AST node kind %d\n", node->kind);
-  exit(EXIT_FAILURE);
+  UNREACHABLE("unhandled expression kind");
 }
 
 // Statement handling
@@ -409,7 +401,8 @@ static void emit_stmt_return(IrGenContext *ctx, AstStmt *stmt) {
 
 static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
   UNUSED(stmt);
-  assert(ctx->current_loop && "Break statement not within a loop");
+  assert(stmt && "emit_stmt_break: stmt is NULL");
+  assert(ctx->current_loop && "emit_stmt_break: break statement not within a loop");
 
   IrInstr inst = {
     .op = IR_OP_JUMP,
@@ -420,7 +413,8 @@ static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
 
 static void emit_stmt_continue(IrGenContext *ctx, AstStmt *stmt) {
   UNUSED(stmt);
-  assert(ctx->current_loop && "Continue statement not within a loop");
+  assert(stmt && "emit_stmt_continue: stmt is NULL");
+  assert(ctx->current_loop && "emit_stmt_continue: continue statement not within a loop");
 
   IrInstr inst = {
     .op = IR_OP_JUMP,
@@ -562,12 +556,10 @@ static void emit_statement(IrGenContext *ctx, AstStmt *stmt) {
     return emit_stmt_while(ctx, stmt);
 
   case AST_STMT_INVALID:
-    fprintf(stderr, "ir_emit_statement: encountered AST_STMT_INVALID node\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("AST_STMT_INVALID reached IR generation");
   }
 
-  fprintf(stderr, "ir_emit_statement: unhandled AST statement kind %d\n", stmt->kind);
-  exit(EXIT_FAILURE);
+  UNREACHABLE("unhandled statement kind");
 }
 
 // Declaration handling
@@ -638,12 +630,10 @@ static void emit_decl(IrGenContext *ctx, AstDecl *decl) {
     return emit_decl_function(ctx, decl);
 
   case AST_DECL_INVALID:
-    fprintf(stderr, "ir_emit_decl: encountered AST_DECL_INVALID node\n");
-    exit(EXIT_FAILURE);
+    UNREACHABLE("AST_DECL_INVALID reached IR generation");
   }
 
-  fprintf(stderr, "ir_emit_decl: unhandled AST declaration kind %d\n", decl->kind);
-  exit(EXIT_FAILURE);
+  UNREACHABLE("unhandled declaration kind");
 }
 
 void gen_ir_init(IrGenContext *ctx, CompilationUnit *comp_unit, SemaContext *sema_ctx) {
