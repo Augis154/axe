@@ -1,10 +1,8 @@
-#ifndef FRONTEND_H
-#define FRONTEND_H
+#ifndef TOKEN_H
+#define TOKEN_H
 
-#include "ast.h"
-#include "compiler.h"
+#include "common.h"
 
-#include <stdbool.h>
 #include <stddef.h>
 
 #define TOKENS_SPECIAL(X) \
@@ -16,22 +14,22 @@
   X(TOKEN_MINUS, "-")       \
   X(TOKEN_STAR, "*")        \
   X(TOKEN_SLASH, "/")       \
-  X(TOKEN_EQUAL, "=")       \
+  X(TOKEN_ASSIGN, "=")      \
   X(TOKEN_BANG, "!")        \
                             \
   X(TOKEN_LESS, "<")        \
   X(TOKEN_GREATER, ">")     \
                             \
-  X(TOKEN_EQEQ, "==")       \
+  X(TOKEN_EQ, "==")         \
   X(TOKEN_NOT_EQ, "!=")     \
   X(TOKEN_LESS_EQ, "<=")    \
   X(TOKEN_GREATER_EQ, ">=")
 
 #define TOKENS_SYMBOLS(X) \
-  X(TOKEN_OPAREN, "(")    \
-  X(TOKEN_CPAREN, ")")    \
-  X(TOKEN_OBRACE, "{")    \
-  X(TOKEN_CBRACE, "}")    \
+  X(TOKEN_LPAREN, "(")    \
+  X(TOKEN_RPAREN, ")")    \
+  X(TOKEN_LBRACE, "{")    \
+  X(TOKEN_RBRACE, "}")    \
                           \
   X(TOKEN_COMMA, ",")     \
   X(TOKEN_COLON, ":")     \
@@ -79,46 +77,4 @@ typedef struct {
   size_t lexeme_len;
 } Token;
 
-typedef struct {
-  const char *name;
-  size_t name_len;
-  TokenKind kind;
-} Keyword;
-
-typedef struct {
-  const char *filename;
-
-  const char *source_start;
-  const char *source_end;
-
-  const char *token_start;
-  const char *current;
-
-  size_t line;
-} Lexer;
-
-typedef struct {
-  CompilationUnit *comp_unit;
-  Lexer lexer;
-
-  Token current;
-  Token next;
-
-  bool panic_mode;
-} Parser;
-
-void lexer_init(Lexer *lex, CompilationUnit *comp_unit);
-void parser_init(Parser *parser, CompilationUnit *comp_unit);
-
-Token lexer_get_token(Lexer *lex);
-
-const char *lexer_render_token_kind(TokenKind kind);
-
-AstExpr *parse_expression(Parser *parser);
-AstStmt *parse_statement(Parser *parser);
-AstDecl *parse_declaration(Parser *parser);
-AstType *parse_type(Parser *parser);
-
-AstProgram *parse_program(Parser *parser);
-
-#endif // FRONTEND_H
+#endif // TOKEN_H

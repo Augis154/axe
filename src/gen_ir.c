@@ -1,4 +1,4 @@
-#include "ir.h"
+#include "gen_ir.h"
 #include "lib/array.h"
 #include "sema.h"
 #include "types.h"
@@ -8,51 +8,51 @@
 #include <stdlib.h>
 
 static IrType get_ir_type(Type *type) {
-  if (!type) return IR_TYPE_WORD;
+  if (!type) return IR_TYPE_I32;
 
   switch (type->kind) {
-  case TYPE_I32:
-    return IR_TYPE_WORD;
-  case TYPE_I64:
-    return IR_TYPE_LONG;
+  case TYPE_KIND_I32:
+    return IR_TYPE_I32;
+  case TYPE_KIND_I64:
+    return IR_TYPE_I64;
 
-  case TYPE_F32:
-    return IR_TYPE_SPF;
-  case TYPE_F64:
-    return IR_TYPE_DPF;
+  case TYPE_KIND_F32:
+    return IR_TYPE_F32;
+  case TYPE_KIND_F64:
+    return IR_TYPE_F64;
 
-  case TYPE_BOOL:
-    return IR_TYPE_WORD;
+  case TYPE_KIND_BOOL:
+    return IR_TYPE_I32;
 
-  case TYPE_ERROR:
-  case TYPE_VOID:
-  case TYPE_FUNCTION:
-  case TYPE_UNTYPED_INT:
-  case TYPE_UNTYPED_FLOAT:
+  case TYPE_KIND_ERROR:
+  case TYPE_KIND_VOID:
+  case TYPE_KIND_FUNCTION:
+  case TYPE_KIND_UNTYPED_INT:
+  case TYPE_KIND_UNTYPED_FLOAT:
     return IR_TYPE_NONE;
   }
 
-  return IR_TYPE_WORD;
+  return IR_TYPE_I32;
 }
 
-static inline IrFunction *get_current_func(IrContext *ctx) {
+static inline IrFunction *get_current_func(IrGenContext *ctx) {
   return &ctx->module->functions[ctx->current_func_idx];
 }
 
-static IrReg next_reg(IrContext *ctx, Type *type) {
+static IrReg next_reg(IrGenContext *ctx, Type *type) {
   IrFunction *current_func = get_current_func(ctx);
   IrReg reg = (IrReg){.id = (ctx)->next_reg++};
   da_append(current_func->reg_types, get_ir_type(type));
   return reg;
 }
 
-static IrLabel next_label(IrContext *ctx) {
+static IrLabel next_label(IrGenContext *ctx) {
   IrLabel label = (IrLabel){.id = (ctx)->next_label++};
   return label;
 }
 
-static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
-  if (instr.op == IR_INST_LABEL) {
+static void emit_ir_instr(IrGenContext *ctx, IrInstr instr) {
+  if (instr.op == IR_OP_LABEL) {
     ctx->block_terminated = false;
   }
 
@@ -63,12 +63,12 @@ static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
   IrFunction *current_func = get_current_func(ctx);
   da_append(current_func->buffer, instr);
 
-  if (instr.op == IR_INST_JUMP || instr.op == IR_INST_RETURN) {
+  if (instr.op == IR_OP_JUMP || instr.op == IR_OP_RETURN) {
     ctx->block_terminated = true;
   }
 }
 
-static IrReg emit_cast_if_needed(IrContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
+static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
   if (type_equals(from_type, to_type)) {
     return src_reg;
   }
@@ -85,7 +85,7 @@ static IrReg emit_cast_if_needed(IrContext *ctx, IrReg src_reg, Type *from_type,
     IrReg dest_reg = next_reg(ctx, to_type);
 
     IrInstr inst = {
-      .op = IR_INST_SEXT,
+      .op = IR_OP_SEXT,
       .res = dest_reg,
       .arg1 = src_reg,
     };
@@ -98,7 +98,7 @@ static IrReg emit_cast_if_needed(IrContext *ctx, IrReg src_reg, Type *from_type,
     IrReg dest_reg = next_reg(ctx, to_type);
 
     IrInstr inst = {
-      .op = IR_INST_TRUNC,
+      .op = IR_OP_TRUNC,
       .res = dest_reg,
       .arg1 = src_reg,
     };
@@ -111,14 +111,14 @@ static IrReg emit_cast_if_needed(IrContext *ctx, IrReg src_reg, Type *from_type,
 
 // Expression handling
 
-static IrReg emit_expression(IrContext *ctx, AstExpr *node);
+static IrReg emit_expression(IrGenContext *ctx, AstExpr *node);
 
 static IrOp get_unary_ir_op(UnaryOp op) {
   switch (op) {
   case UNOP_NEGATE:
-    return IR_INST_NEGATE;
+    return IR_OP_NEGATE;
   case UNOP_NOT:
-    return IR_INST_NOT;
+    return IR_OP_NOT;
 
   case UNOP_COUNT:
     fprintf(stderr, "get_unary_ir_op: UNOP_COUNT is not a valid operator\n");
@@ -132,26 +132,26 @@ static IrOp get_unary_ir_op(UnaryOp op) {
 static IrOp get_binary_ir_op(BinaryOp op) {
   switch (op) {
   case BINOP_ADD:
-    return IR_INST_ADD;
+    return IR_OP_ADD;
   case BINOP_SUB:
-    return IR_INST_SUB;
+    return IR_OP_SUB;
   case BINOP_MUL:
-    return IR_INST_MUL;
+    return IR_OP_MUL;
   case BINOP_DIV:
-    return IR_INST_DIV;
+    return IR_OP_DIV;
 
   case BINOP_LESS:
-    return IR_INST_CMP_LT;
+    return IR_OP_CMP_LT;
   case BINOP_GREATER:
-    return IR_INST_CMP_GT;
-  case BINOP_EQEQ:
-    return IR_INST_CMP_EQ;
+    return IR_OP_CMP_GT;
+  case BINOP_EQ:
+    return IR_OP_CMP_EQ;
   case BINOP_NOT_EQ:
-    return IR_INST_CMP_NE;
+    return IR_OP_CMP_NE;
   case BINOP_LESS_EQ:
-    return IR_INST_CMP_LE;
+    return IR_OP_CMP_LE;
   case BINOP_GREATER_EQ:
-    return IR_INST_CMP_GE;
+    return IR_OP_CMP_GE;
 
   case BINOP_COUNT:
     fprintf(stderr, "get_binary_ir_op: BINOP_COUNT is not a valid operator\n");
@@ -162,21 +162,21 @@ static IrOp get_binary_ir_op(BinaryOp op) {
   exit(EXIT_FAILURE);
 }
 
-static IrReg emit_literal(IrContext *ctx, AstExpr *node) {
+static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_literal: node is NULL");
 
-  AstLiteral *literal = &node->literal;
+  AstExprLiteral *literal = &node->expr_literal;
 
-  switch (literal->type) {
-  case LITERAL_INT:
+  switch (literal->kind) {
+  case AST_LITERAL_INT:
     break;
-  case LITERAL_FLOAT:
+  case AST_LITERAL_FLOAT:
     fprintf(stderr, "emit_literal: float literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
-  case LITERAL_CHAR:
+  case AST_LITERAL_CHAR:
     fprintf(stderr, "emit_literal: char literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
-  case LITERAL_STRING:
+  case AST_LITERAL_STRING:
     fprintf(stderr, "emit_literal: string literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
   }
@@ -184,46 +184,46 @@ static IrReg emit_literal(IrContext *ctx, AstExpr *node) {
   IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
-    .op = IR_INST_LOAD_LITERAL,
+    .op = IR_OP_LOAD_LITERAL,
     .res = res,
-    .literal = node->literal.int_value,
+    .literal = node->expr_literal.int_value,
   };
   emit_ir_instr(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_identifier(IrContext *ctx, AstExpr *node) {
+static IrReg emit_identifier(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_identifier: node is NULL");
 
   IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
-    .op = IR_INST_LOAD_VAR,
+    .op = IR_OP_LOAD_VAR,
     .res = res,
-    .var_name = node->identifier.name,
+    .var_name = node->expr_identifier.name,
   };
   emit_ir_instr(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_assignment(IrContext *ctx, AstExpr *node) {
+static IrReg emit_assignment(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_assignment: node is NULL");
 
-  IrReg value = emit_expression(ctx, node->assignment.value);
+  IrReg value = emit_expression(ctx, node->expr_assign.value);
 
   IrInstr inst = {
-    .op = IR_INST_STORE_VAR,
+    .op = IR_OP_STORE_VAR,
     .res = value,
-    .var_name = node->assignment.target->identifier.name,
+    .var_name = node->expr_assign.target->expr_identifier.name,
   };
   emit_ir_instr(ctx, inst);
 
   return value;
 }
 
-static IrReg emit_call(IrContext *ctx, AstExpr *node) {
+static IrReg emit_call(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_call: node is NULL");
 
   IrFuncArg *arg_params = NULL;
@@ -246,11 +246,11 @@ static IrReg emit_call(IrContext *ctx, AstExpr *node) {
   IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
 
   IrInstr inst = {
-    .op = IR_INST_CALL,
+    .op = IR_OP_CALL,
     .res = res,
     .call =
       {
-        .callee = node->expr_call.callee->identifier.name,
+        .callee = node->expr_call.callee->expr_identifier.name,
         .args = arg_params,
         .arg_count = arg_count,
       },
@@ -260,7 +260,7 @@ static IrReg emit_call(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg emit_unary_op(IrContext *ctx, AstExpr *node) {
+static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_unary_op: node is NULL");
 
   IrReg operand = emit_expression(ctx, node->expr_unary.operand);
@@ -277,7 +277,7 @@ static IrReg emit_unary_op(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg emit_binary_op(IrContext *ctx, AstExpr *node) {
+static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_binary_op: node is NULL");
 
   IrReg left = emit_expression(ctx, node->expr_binary.left);
@@ -296,30 +296,30 @@ static IrReg emit_binary_op(IrContext *ctx, AstExpr *node) {
   return res;
 }
 
-static IrReg emit_expression(IrContext *ctx, AstExpr *node) {
+static IrReg emit_expression(IrGenContext *ctx, AstExpr *node) {
   if (!node) {
     return NULL_REG;
   }
 
   switch (node->kind) {
-  case EXPR_LITERAL:
+  case AST_EXPR_LITERAL:
     return emit_literal(ctx, node);
 
-  case EXPR_IDENTIFIER:
+  case AST_EXPR_IDENTIFIER:
     return emit_identifier(ctx, node);
 
-  case EXPR_ASSIGN:
+  case AST_EXPR_ASSIGN:
     return emit_assignment(ctx, node);
-  case EXPR_CALL:
+  case AST_EXPR_CALL:
     return emit_call(ctx, node);
 
-  case EXPR_UNARY:
+  case AST_EXPR_UNARY:
     return emit_unary_op(ctx, node);
-  case EXPR_BINARY:
+  case AST_EXPR_BINARY:
     return emit_binary_op(ctx, node);
 
-  case EXPR_INVALID:
-    fprintf(stderr, "ir_emit_expression: encountered EXPR_INVALID node\n");
+  case AST_EXPR_INVALID:
+    fprintf(stderr, "ir_emit_expression: encountered AST_EXPR_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
@@ -329,32 +329,32 @@ static IrReg emit_expression(IrContext *ctx, AstExpr *node) {
 
 // Statement handling
 
-static void emit_statement(IrContext *ctx, AstStmt *stmt);
+static void emit_statement(IrGenContext *ctx, AstStmt *stmt);
 
-static void emit_stmt_block(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_block(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_block: stmt is NULL");
 
-  for (size_t i = 0; i < stmt->stmt_block.count; i++) {
+  for (size_t i = 0; i < stmt->stmt_block.statement_count; i++) {
     AstStmt *inner_stmt = stmt->stmt_block.statements[i];
     emit_statement(ctx, inner_stmt);
   }
 }
 
-static void emit_stmt_expression(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_expression(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_expression: stmt is NULL");
 
-  emit_expression(ctx, stmt->stmt_expr.expression);
+  emit_expression(ctx, stmt->stmt_expression.expression);
 }
 
-static void emit_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
-  assert(stmt && "emit_stmt_var_decl: stmt is NULL");
+static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
+  assert(stmt && "emit_stmt_local_var: stmt is NULL");
 
-  IrReg init_reg = emit_expression(ctx, stmt->stmt_var_decl.init);
+  IrReg init_reg = emit_expression(ctx, stmt->stmt_local_var.init);
 
   if (init_reg.id == NULL_REG.id) {
     init_reg = next_reg(ctx, TYPE_i32);
     IrInstr inst = {
-      .op = IR_INST_LOAD_LITERAL,
+      .op = IR_OP_LOAD_LITERAL,
       .res = init_reg,
       .literal = 0,
     };
@@ -362,14 +362,14 @@ static void emit_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
   }
 
   IrInstr inst = {
-    .op = IR_INST_STORE_VAR,
+    .op = IR_OP_STORE_VAR,
     .res = init_reg,
-    .var_name = stmt->stmt_var_decl.name,
+    .var_name = stmt->stmt_local_var.name,
   };
   emit_ir_instr(ctx, inst);
 }
 
-static void emit_stmt_return(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_return(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_return: stmt is NULL");
 
   IrReg value = NULL_REG;
@@ -384,33 +384,33 @@ static void emit_stmt_return(IrContext *ctx, AstStmt *stmt) {
   }
 
   IrInstr inst = {
-    .op = IR_INST_RETURN,
+    .op = IR_OP_RETURN,
     .arg1 = value,
   };
   emit_ir_instr(ctx, inst);
 }
 
-static void emit_stmt_break(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
   assert(ctx->current_loop && "Break statement not within a loop");
 
   IrInstr inst = {
-    .op = IR_INST_JUMP,
+    .op = IR_OP_JUMP,
     .target = ctx->current_loop->break_label,
   };
   emit_ir_instr(ctx, inst);
 }
 
-static void emit_stmt_continue(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_continue(IrGenContext *ctx, AstStmt *stmt) {
   assert(ctx->current_loop && "Continue statement not within a loop");
 
   IrInstr inst = {
-    .op = IR_INST_JUMP,
+    .op = IR_OP_JUMP,
     .target = ctx->current_loop->continue_label,
   };
   emit_ir_instr(ctx, inst);
 }
 
-static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_if(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_if: stmt is NULL");
 
   IrLabel then_label = next_label(ctx);
@@ -421,7 +421,7 @@ static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
   IrReg cond_reg = emit_expression(ctx, stmt->stmt_if.condition);
 
   IrInstr cond_jump_instr = {
-    .op = IR_INST_JNZ,
+    .op = IR_OP_JNZ,
     .arg1 = cond_reg,
     .target_true = then_label,
     .target_false = else_label,
@@ -430,7 +430,7 @@ static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
 
   // Then branch
   IrInstr then_label_instr = {
-    .op = IR_INST_LABEL,
+    .op = IR_OP_LABEL,
     .target = then_label,
   };
   emit_ir_instr(ctx, then_label_instr);
@@ -440,7 +440,7 @@ static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
   // Jump to end if the then branch is not terminated
   if (!ctx->block_terminated) {
     IrInstr jump_to_end_instr = {
-      .op = IR_INST_JUMP,
+      .op = IR_OP_JUMP,
       .target = end_label,
     };
     emit_ir_instr(ctx, jump_to_end_instr);
@@ -449,7 +449,7 @@ static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
   // Else branch
   if (stmt->stmt_if.else_branch) {
     IrInstr else_label_instr = {
-      .op = IR_INST_LABEL,
+      .op = IR_OP_LABEL,
       .target = else_label,
     };
     emit_ir_instr(ctx, else_label_instr);
@@ -458,13 +458,13 @@ static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
   }
 
   IrInstr end_label_instr = {
-    .op = IR_INST_LABEL,
+    .op = IR_OP_LABEL,
     .target = end_label,
   };
   emit_ir_instr(ctx, end_label_instr);
 }
 
-static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
+static void emit_stmt_while(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_while: stmt is NULL");
 
   IrLabel start_label = next_label(ctx);
@@ -479,7 +479,7 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
   ctx->current_loop = &loop_labels;
 
   IrInstr start_label_instr = {
-    .op = IR_INST_LABEL,
+    .op = IR_OP_LABEL,
     .target = start_label,
   };
   emit_ir_instr(ctx, start_label_instr);
@@ -487,7 +487,7 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
   IrReg cond_reg = emit_expression(ctx, stmt->stmt_while.condition);
 
   IrInstr cond_jump_instr = {
-    .op = IR_INST_JNZ,
+    .op = IR_OP_JNZ,
     .arg1 = cond_reg,
     .target_true = fallthrough_label,
     .target_false = end_label,
@@ -495,7 +495,7 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
   emit_ir_instr(ctx, cond_jump_instr);
 
   IrInstr fallthrough_label_instr = {
-    .op = IR_INST_LABEL,
+    .op = IR_OP_LABEL,
     .target = fallthrough_label,
   };
   emit_ir_instr(ctx, fallthrough_label_instr);
@@ -504,14 +504,14 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
 
   if (!ctx->block_terminated) {
     IrInstr jump_to_start_instr = {
-      .op = IR_INST_JUMP,
+      .op = IR_OP_JUMP,
       .target = start_label,
     };
     emit_ir_instr(ctx, jump_to_start_instr);
   }
 
   IrInstr end_label_instr = {
-    .op = IR_INST_LABEL,
+    .op = IR_OP_LABEL,
     .target = end_label,
   };
   emit_ir_instr(ctx, end_label_instr);
@@ -519,31 +519,31 @@ static void emit_stmt_while(IrContext *ctx, AstStmt *stmt) {
   ctx->current_loop = loop_labels.parent;
 }
 
-static void emit_statement(IrContext *ctx, AstStmt *stmt) {
+static void emit_statement(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_statement: stmt is NULL");
 
   switch (stmt->kind) {
-  case STMT_BLOCK:
+  case AST_STMT_BLOCK:
     return emit_stmt_block(ctx, stmt);
-  case STMT_EXPRESSION:
+  case AST_STMT_EXPRESSION:
     return emit_stmt_expression(ctx, stmt);
-  case STMT_VAR_DECL:
-    return emit_stmt_var_decl(ctx, stmt);
+  case AST_STMT_LOCAL_VAR:
+    return emit_stmt_local_var(ctx, stmt);
 
-  case STMT_RETURN:
+  case AST_STMT_RETURN:
     return emit_stmt_return(ctx, stmt);
-  case STMT_BREAK:
+  case AST_STMT_BREAK:
     return emit_stmt_break(ctx, stmt);
-  case STMT_CONTINUE:
+  case AST_STMT_CONTINUE:
     return emit_stmt_continue(ctx, stmt);
 
-  case STMT_IF:
+  case AST_STMT_IF:
     return emit_stmt_if(ctx, stmt);
-  case STMT_WHILE:
+  case AST_STMT_WHILE:
     return emit_stmt_while(ctx, stmt);
 
-  case STMT_INVALID:
-    fprintf(stderr, "ir_emit_statement: encountered STMT_INVALID node\n");
+  case AST_STMT_INVALID:
+    fprintf(stderr, "ir_emit_statement: encountered AST_STMT_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
@@ -552,9 +552,9 @@ static void emit_statement(IrContext *ctx, AstStmt *stmt) {
 }
 
 // Declaration handling
-static void emit_decl(IrContext *ctx, AstDecl *decl);
+static void emit_decl(IrGenContext *ctx, AstDecl *decl);
 
-static void emit_decl_function(IrContext *ctx, AstDecl *decl) {
+static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
   assert(decl && "emit_decl_function: decl is NULL");
 
   AstDeclFunction *func_decl = &decl->decl_function;
@@ -588,7 +588,7 @@ static void emit_decl_function(IrContext *ctx, AstDecl *decl) {
     params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrFuncParam) * param_count);
 
     for (size_t i = 0; i < param_count; i++) {
-      AstFuncParam *param = &func_decl->params[i];
+      AstParam *param = &func_decl->params[i];
 
       IrReg param_reg = next_reg(ctx, param->symbol->type);
 
@@ -604,22 +604,22 @@ static void emit_decl_function(IrContext *ctx, AstDecl *decl) {
 
   if (!ctx->block_terminated) {
     IrInstr ret_inst = {
-      .op = IR_INST_RETURN,
+      .op = IR_OP_RETURN,
       .arg1 = NULL_REG,
     };
     emit_ir_instr(ctx, ret_inst);
   }
 }
 
-static void emit_decl(IrContext *ctx, AstDecl *decl) {
+static void emit_decl(IrGenContext *ctx, AstDecl *decl) {
   assert(decl && "emit_decl: decl is NULL");
 
   switch (decl->kind) {
-  case DECL_FUNCTION:
+  case AST_DECL_FUNCTION:
     return emit_decl_function(ctx, decl);
 
-  case DECL_INVALID:
-    fprintf(stderr, "ir_emit_decl: encountered DECL_INVALID node\n");
+  case AST_DECL_INVALID:
+    fprintf(stderr, "ir_emit_decl: encountered AST_DECL_INVALID node\n");
     exit(EXIT_FAILURE);
   }
 
@@ -627,7 +627,7 @@ static void emit_decl(IrContext *ctx, AstDecl *decl) {
   exit(EXIT_FAILURE);
 }
 
-void ir_init(IrContext *ctx, CompilationUnit *comp_unit, SemaContext *sema_ctx) {
+void gen_ir_init(IrGenContext *ctx, CompilationUnit *comp_unit, SemaContext *sema_ctx) {
   ctx->comp_unit = comp_unit;
   ctx->sema_ctx = sema_ctx;
 
@@ -641,7 +641,7 @@ void ir_init(IrContext *ctx, CompilationUnit *comp_unit, SemaContext *sema_ctx) 
   ctx->block_terminated = false;
 }
 
-void ir_free(IrContext *ctx) {
+void gen_ir_free(IrGenContext *ctx) {
   for (size_t i = 0; i < da_len(ctx->module->functions); i++) {
     IrFunction *func = &ctx->module->functions[i];
     da_free(func->buffer);
@@ -650,7 +650,7 @@ void ir_free(IrContext *ctx) {
   da_free(ctx->module->functions);
 }
 
-void emit_ir(IrContext *ctx, AstProgram *program) {
+void gen_ir(IrGenContext *ctx, AstProgram *program) {
   if (!program) {
     return;
   }

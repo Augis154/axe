@@ -41,36 +41,36 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
   }
 
   switch (node->kind) {
-  case EXPR_LITERAL:
-    switch (node->literal.type) {
-    case LITERAL_INT:
-      printf("%ld", node->literal.int_value);
+  case AST_EXPR_LITERAL:
+    switch (node->expr_literal.kind) {
+    case AST_LITERAL_INT:
+      printf("%ld", node->expr_literal.int_value);
       return;
-    case LITERAL_FLOAT:
-      printf("%f", node->literal.float_value);
+    case AST_LITERAL_FLOAT:
+      printf("%f", node->expr_literal.float_value);
       return;
-    case LITERAL_CHAR:
-      printf("'%c'", node->literal.char_value);
+    case AST_LITERAL_CHAR:
+      printf("'%c'", node->expr_literal.char_value);
       return;
-    case LITERAL_STRING:
-      printf("\"%s\"", node->literal.string_value);
+    case AST_LITERAL_STRING:
+      printf("\"%s\"", node->expr_literal.string_value);
       return;
     }
     printf("<unknown literal type>");
     return;
 
-  case EXPR_IDENTIFIER:
-    printf("%s", node->identifier.name);
+  case AST_EXPR_IDENTIFIER:
+    printf("%s", node->expr_identifier.name);
     return;
 
-  case EXPR_ASSIGN:
+  case AST_EXPR_ASSIGN:
     printf("(= ");
-    debug_print_ast_sexpr(arena, node->assignment.target);
+    debug_print_ast_sexpr(arena, node->expr_assign.target);
     printf(" ");
-    debug_print_ast_sexpr(arena, node->assignment.value);
+    debug_print_ast_sexpr(arena, node->expr_assign.value);
     printf(")");
     return;
-  case EXPR_CALL:
+  case AST_EXPR_CALL:
     printf("(call ");
     debug_print_ast_sexpr(arena, node->expr_call.callee);
     for (size_t i = 0; i < node->expr_call.argument_count; i++) {
@@ -80,13 +80,13 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     printf(")");
     return;
 
-  case EXPR_UNARY:
+  case AST_EXPR_UNARY:
     printf("(%s ", unop_strings[node->expr_unary.op]);
     debug_print_ast_sexpr(arena, node->expr_unary.operand);
     printf(")");
     return;
 
-  case EXPR_BINARY:
+  case AST_EXPR_BINARY:
     printf("(%s ", binop_strings[node->expr_binary.op]);
     debug_print_ast_sexpr(arena, node->expr_binary.left);
     printf(" ");
@@ -94,7 +94,7 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     printf(")");
     return;
 
-  case EXPR_INVALID:
+  case AST_EXPR_INVALID:
     printf("<invalid expr node>");
     return;
   }
@@ -109,9 +109,9 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
   }
 
   switch (stmt->kind) {
-  case STMT_BLOCK:
+  case AST_STMT_BLOCK:
     printf("Block Statement:\n");
-    for (size_t i = 0; i < stmt->stmt_block.count; i++) {
+    for (size_t i = 0; i < stmt->stmt_block.statement_count; i++) {
       print_indent(1);
       printf("Statement %zu:\n", i);
       print_indent(2);
@@ -119,28 +119,28 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
     }
     return;
 
-  case STMT_EXPRESSION:
+  case AST_STMT_EXPRESSION:
     printf("Expression Statement:\n");
     print_indent(1);
-    debug_print_ast_sexpr(arena, stmt->stmt_expr.expression);
+    debug_print_ast_sexpr(arena, stmt->stmt_expression.expression);
     printf("\n");
     return;
 
-  case STMT_VAR_DECL:
-    printf("Variable Declaration: %s\n", stmt->stmt_var_decl.name);
-    // if (stmt->stmt_var_decl.type) {
+  case AST_STMT_LOCAL_VAR:
+    printf("Variable Declaration: %s\n", stmt->stmt_local_var.name);
+    // if (stmt->stmt_local_var.declared_type) {
     //   print_indent(1);
-    //   printf("Type: %s\n", stmt->stmt_var_decl.type);
+    //   printf("Type: %s\n", stmt->stmt_local_var.declared_type);
     // }
-    if (stmt->stmt_var_decl.init) {
+    if (stmt->stmt_local_var.init) {
       print_indent(1);
       printf("Init: ");
-      debug_print_ast_sexpr(arena, stmt->stmt_var_decl.init);
+      debug_print_ast_sexpr(arena, stmt->stmt_local_var.init);
       printf("\n");
     }
     return;
 
-  case STMT_RETURN:
+  case AST_STMT_RETURN:
     printf("Return Statement:\n");
     if (stmt->stmt_return.value) {
       print_indent(1);
@@ -149,14 +149,14 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
       printf("\n");
     }
     return;
-  case STMT_BREAK:
+  case AST_STMT_BREAK:
     printf("Break Statement\n");
     return;
-  case STMT_CONTINUE:
+  case AST_STMT_CONTINUE:
     printf("Continue Statement\n");
     return;
 
-  case STMT_IF:
+  case AST_STMT_IF:
     printf("If Statement:\n");
     print_indent(1);
     printf("Condition: ");
@@ -172,7 +172,7 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
     }
     return;
 
-  case STMT_WHILE:
+  case AST_STMT_WHILE:
     printf("While Statement:\n");
     print_indent(1);
     printf("Condition: ");
@@ -183,7 +183,7 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
     debug_print_ast_stmt(arena, stmt->stmt_while.body);
     return;
 
-  case STMT_INVALID:
+  case AST_STMT_INVALID:
     printf("<invalid statement node>\n");
     return;
   }
@@ -198,14 +198,14 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
   }
 
   switch (decl->kind) {
-  case DECL_FUNCTION:
+  case AST_DECL_FUNCTION:
     printf("Function Declaration: %s\n", decl->decl_function.name);
     print_indent(1);
     printf("Body:\n");
     debug_print_ast_stmt(arena, decl->decl_function.body);
     return;
 
-  case DECL_INVALID:
+  case AST_DECL_INVALID:
     printf("<invalid declaration node>\n");
     return;
   }
@@ -218,76 +218,76 @@ void debug_print_ir_function(IrFunction *ir_func) {
     IrInstr *inst = &ir_func->buffer[i];
 
     switch (inst->op) {
-    case IR_INST_NONE:
+    case IR_OP_NONE:
       printf("%zu: <none>\n", i);
       continue;
 
-    case IR_INST_LOAD_LITERAL:
+    case IR_OP_LOAD_LITERAL:
       printf("%zu: r%u = %ld\n", i, inst->res.id, inst->literal);
       continue;
 
-    case IR_INST_LOAD_VAR:
+    case IR_OP_LOAD_VAR:
       printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var_name);
       continue;
-    case IR_INST_STORE_VAR:
+    case IR_OP_STORE_VAR:
       printf("%zu: STORE_VAR %s = r%u\n", i, inst->var_name, inst->res.id);
       continue;
 
       // Unary operations
-    case IR_INST_NEGATE:
+    case IR_OP_NEGATE:
       printf("%zu: r%u = -r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
-    case IR_INST_NOT:
+    case IR_OP_NOT:
       printf("%zu: r%u = !r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
 
       // Binary operations
-    case IR_INST_ADD:
+    case IR_OP_ADD:
       printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_SUB:
+    case IR_OP_SUB:
       printf("%zu: r%u = r%u - r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_MUL:
+    case IR_OP_MUL:
       printf("%zu: r%u = r%u * r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_DIV:
+    case IR_OP_DIV:
       printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
 
-    case IR_INST_CMP_EQ:
+    case IR_OP_CMP_EQ:
       printf("%zu: r%u = r%u == r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_CMP_NE:
+    case IR_OP_CMP_NE:
       printf("%zu: r%u = r%u != r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_CMP_LT:
+    case IR_OP_CMP_LT:
       printf("%zu: r%u = r%u < r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_CMP_GT:
+    case IR_OP_CMP_GT:
       printf("%zu: r%u = r%u > r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_CMP_LE:
+    case IR_OP_CMP_LE:
       printf("%zu: r%u = r%u <= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_INST_CMP_GE:
+    case IR_OP_CMP_GE:
       printf("%zu: r%u = r%u >= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
 
-    case IR_INST_LABEL:
+    case IR_OP_LABEL:
       printf("%zu: @l%u:\n", i, inst->target.id);
       continue;
-    case IR_INST_JUMP:
+    case IR_OP_JUMP:
       printf("%zu: JUMP @l%u\n", i, inst->target.id);
       continue;
-    case IR_INST_JZ:
+    case IR_OP_JZ:
       printf("%zu: JZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
       continue;
-    case IR_INST_JNZ:
+    case IR_OP_JNZ:
       printf("%zu: JNZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
       continue;
 
-    case IR_INST_CALL:
+    case IR_OP_CALL:
       printf("%zu: CALL r%u, %s(", i, inst->res.id, inst->var_name);
       for (size_t j = 0; j < inst->call.arg_count; j++) {
         printf("r%u", inst->call.args[j].reg.id);
@@ -297,7 +297,7 @@ void debug_print_ir_function(IrFunction *ir_func) {
       }
       printf(")\n");
       continue;
-    case IR_INST_RETURN:
+    case IR_OP_RETURN:
       printf("%zu: RETURN r%u\n", i, inst->arg1.id);
       continue;
     }
@@ -330,7 +330,7 @@ static const char *binop_strings[BINOP_COUNT] = {
   [BINOP_MUL] = "*",
   [BINOP_DIV] = "/",
 
-  [BINOP_EQEQ] = "==",
+  [BINOP_EQ] = "==",
   [BINOP_NOT_EQ] = "!=",
   [BINOP_LESS] = "<",
   [BINOP_GREATER] = ">",

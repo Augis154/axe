@@ -1,4 +1,4 @@
-CFLAGS = -ggdb
+CFLAGS = -ggdb -Wall -Wextra -MMD -MP
 
 CURRENT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 BUILD_DIR = build
@@ -23,7 +23,7 @@ $(BUILD_DIR):
 .PHONY: all clean compile format
 
 clean:
-	rm -r $(BUILD_DIR)
+	rm -rf $(BUILD_DIR)
 
 compile: all
 	./axc expr.ax
@@ -32,3 +32,5 @@ compile: all
 
 format:
 	find src -name '*.[ch]' | xargs clang-format -i
+
+-include $(OBJ:.o=.d)

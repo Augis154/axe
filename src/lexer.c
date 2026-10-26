@@ -1,9 +1,15 @@
-#include "frontend.h"
+#include "lexer.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct {
+  const char *name;
+  size_t name_len;
+  TokenKind kind;
+} Keyword;
 
 static const Keyword keywords[];
 static const size_t KEYWORD_COUNT;
@@ -12,14 +18,14 @@ static inline bool reached_end(Lexer *l) {
   return l->current >= l->source_end;
 }
 
-static inline const char peek(Lexer *l) {
+static inline char peek(Lexer *l) {
   if (reached_end(l)) {
     return '\0';
   }
   return *l->current;
 }
 
-static inline const char peek_next(Lexer *l) {
+static inline char peek_next(Lexer *l) {
   if (l->current + 1 >= l->source_end) {
     return '\0';
   }
@@ -201,13 +207,13 @@ Token lexer_get_token(Lexer *lex) {
     return new_token(lex, TOKEN_SEMICOLON);
 
   case '(':
-    return new_token(lex, TOKEN_OPAREN);
+    return new_token(lex, TOKEN_LPAREN);
   case ')':
-    return new_token(lex, TOKEN_CPAREN);
+    return new_token(lex, TOKEN_RPAREN);
   case '{':
-    return new_token(lex, TOKEN_OBRACE);
+    return new_token(lex, TOKEN_LBRACE);
   case '}':
-    return new_token(lex, TOKEN_CBRACE);
+    return new_token(lex, TOKEN_RBRACE);
 
   case '+':
     return new_token(lex, TOKEN_PLUS);
@@ -221,9 +227,9 @@ Token lexer_get_token(Lexer *lex) {
   case '=':
     if (peek(lex) == '=') {
       advance(lex);
-      return new_token(lex, TOKEN_EQEQ);
+      return new_token(lex, TOKEN_EQ);
     }
-    return new_token(lex, TOKEN_EQUAL);
+    return new_token(lex, TOKEN_ASSIGN);
   case '!':
     if (peek(lex) == '=') {
       advance(lex);
@@ -262,7 +268,7 @@ Token lexer_get_token(Lexer *lex) {
 }
 
 static const Keyword keywords[] = {
-#define KEYWORD_DEF(token, name) {name, strlen(name), token},
+#define KEYWORD_DEF(token, name) {name, sizeof(name) - 1, token},
   TOKENS_KEYWORDS(KEYWORD_DEF)
 #undef KEYWORD_DEF
 };

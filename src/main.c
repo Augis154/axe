@@ -1,9 +1,10 @@
 #include "ast.h"
-#include "backend.h"
+#include "gen_ir.h"
+#include "gen_qbe.h"
 #include "compiler.h"
 #include "debug.h"
-#include "frontend.h"
-#include "ir.h"
+#include "lexer.h"
+#include "parser.h"
 
 #include "lib/arena.h"
 #include "lib/array.h"
@@ -60,16 +61,16 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  IrContext ir_context;
-  ir_init(&ir_context, &comp_unit, &sema_ctx);
+  IrGenContext ir_context;
+  gen_ir_init(&ir_context, &comp_unit, &sema_ctx);
 
-  emit_ir(&ir_context, program);
+  gen_ir(&ir_context, program);
 
   // debug_print_ir_module(ir_context.module);
 
-  generate_qbe("out.ssa", &ir_context);
+  generate_qbe("out.ssa", ir_context.module);
 
-  ir_free(&ir_context);
+  gen_ir_free(&ir_context);
 
   cu_free(&comp_unit);
 

@@ -22,7 +22,7 @@ typedef enum {
 
   BINOP_LESS,
   BINOP_GREATER,
-  BINOP_EQEQ,
+  BINOP_EQ,
   BINOP_NOT_EQ,
   BINOP_LESS_EQ,
   BINOP_GREATER_EQ,
@@ -33,50 +33,50 @@ typedef enum {
 // Expression nodes
 
 typedef enum {
-  EXPR_INVALID,
+  AST_EXPR_INVALID,
 
-  EXPR_LITERAL,
-  EXPR_IDENTIFIER,
+  AST_EXPR_LITERAL,
+  AST_EXPR_IDENTIFIER,
 
-  EXPR_ASSIGN,
-  EXPR_CALL,
+  AST_EXPR_ASSIGN,
+  AST_EXPR_CALL,
 
-  EXPR_UNARY,
-  EXPR_BINARY,
+  AST_EXPR_UNARY,
+  AST_EXPR_BINARY,
 } AstExprKind;
 
 typedef enum {
-  LITERAL_INT,
-  LITERAL_FLOAT,
-  LITERAL_CHAR,
-  LITERAL_STRING,
-} AstLiteralType;
+  AST_LITERAL_INT,
+  AST_LITERAL_FLOAT,
+  AST_LITERAL_CHAR,
+  AST_LITERAL_STRING,
+} AstLiteralKind;
 
 typedef struct {
-  AstLiteralType type;
+  AstLiteralKind kind;
   union {
     int64_t int_value;
     double float_value;
     char char_value;
     const char *string_value;
   };
-} AstLiteral;
+} AstExprLiteral;
 
 typedef struct {
   const char *name;
-  Symbol *symbol;
-} AstIdentifier;
+  Symbol *symbol; // Filled in by sema.
+} AstExprIdentifier;
 
 typedef struct {
   AstExpr *target;
   AstExpr *value;
-} AstAssignment;
+} AstExprAssign;
 
 typedef struct {
   AstExpr *callee;
   AstExpr **arguments;
   size_t argument_count;
-} AstCall;
+} AstExprCall;
 
 typedef struct {
   UnaryOp op;
@@ -95,11 +95,11 @@ struct AstExpr_ {
   SourceLoc loc;
 
   union {
-    AstLiteral literal;
-    AstIdentifier identifier;
+    AstExprLiteral expr_literal;
+    AstExprIdentifier expr_identifier;
 
-    AstCall expr_call;
-    AstAssignment assignment;
+    AstExprAssign expr_assign;
+    AstExprCall expr_call;
 
     AstExprUnary expr_unary;
     AstExprBinary expr_binary;
@@ -109,35 +109,36 @@ struct AstExpr_ {
 // Statement nodes
 
 typedef enum {
-  STMT_INVALID,
+  AST_STMT_INVALID,
 
-  STMT_BLOCK,
-  STMT_EXPRESSION,
-  STMT_VAR_DECL,
+  AST_STMT_BLOCK,
+  AST_STMT_EXPRESSION,
+  AST_STMT_LOCAL_VAR,
 
-  STMT_RETURN,
-  STMT_BREAK,
-  STMT_CONTINUE,
+  AST_STMT_RETURN,
+  AST_STMT_BREAK,
+  AST_STMT_CONTINUE,
 
-  STMT_IF,
-  STMT_WHILE,
+  AST_STMT_IF,
+  AST_STMT_WHILE,
 } AstStmtKind;
 
 typedef struct {
   AstStmt **statements;
-  size_t count;
+  size_t statement_count;
 } AstStmtBlock;
 
 typedef struct {
   AstExpr *expression;
-} AstStmtExpr;
+} AstStmtExpression;
 
 typedef struct {
   const char *name;
-  AstType *type;
+  AstType *declared_type;
   AstExpr *init;
-  Symbol *symbol;
-} AstStmtVarDecl;
+
+  Symbol *symbol; // Filled in by sema.
+} AstStmtLocalVar;
 
 typedef struct {
   AstExpr *value;
@@ -161,8 +162,8 @@ struct AstStmt_ {
 
   union {
     AstStmtBlock stmt_block;
-    AstStmtExpr stmt_expr;
-    AstStmtVarDecl stmt_var_decl;
+    AstStmtExpression stmt_expression;
+    AstStmtLocalVar stmt_local_var;
 
     AstStmtReturn stmt_return;
 
@@ -174,27 +175,27 @@ struct AstStmt_ {
 // Declaration nodes
 
 typedef enum {
-  DECL_INVALID,
-  DECL_FUNCTION,
+  AST_DECL_INVALID,
+  AST_DECL_FUNCTION,
 } AstDeclKind;
 
 typedef struct {
-  const char *name;
   SourceLoc loc;
-  AstType *type;
-  Symbol *symbol;
-} AstFuncParam;
+  const char *name;
+  AstType *declared_type;
+  Symbol *symbol; // Filled in by sema.
+} AstParam;
 
 typedef struct {
   const char *name;
 
-  AstType *return_type;
-  AstStmt *body;
-
-  AstFuncParam *params;
+  AstParam *params;
   size_t param_count;
 
-  Symbol *symbol;
+  AstType *declared_return_type;
+  AstStmt *body;
+
+  Symbol *symbol; // Filled in by sema.
 } AstDeclFunction;
 
 struct AstDecl_ {
@@ -210,8 +211,10 @@ struct AstDecl_ {
 // Type nodes
 
 typedef enum {
-  TYPE_NAMED,
-  TYPE_POINTER,
+  AST_TYPE_INVALID,
+
+  AST_TYPE_NAMED,
+  AST_TYPE_POINTER,
 } AstTypeKind;
 
 typedef struct {
@@ -229,9 +232,11 @@ struct AstType_ {
   };
 };
 
+// Program
+
 typedef struct {
   AstDecl **decls;
-  uint32_t decl_count;
+  size_t decl_count;
 } AstProgram;
 
 AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc);
