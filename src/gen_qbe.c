@@ -172,6 +172,13 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
     fprintf(file, "  %%r%u =%c s%ctof %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
     return;
   }
+  case IR_OP_FTOI: {
+    char to_char = reg_type_char(current_func, instr.res);
+    char from_char = reg_type_char(current_func, instr.arg1);
+
+    fprintf(file, "  %%r%u =%c %ctosi %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    return;
+  }
 
   case IR_OP_SEXT: {
     char to_char = reg_type_char(current_func, instr.res);
