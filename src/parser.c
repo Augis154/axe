@@ -1,6 +1,7 @@
 #include "parser.h"
 
 #include "ast.h"
+#include "common.h"
 #include "lib/array.h"
 
 #include <assert.h>
@@ -14,6 +15,7 @@ typedef enum {
   PREC_COMPARISON, // < > <= >=
   PREC_TERM,       // + -
   PREC_FACTOR,     // * /
+  PREC_CAST,       // as
   PREC_UNARY,      // -
   PREC_CALL,       // . () []
 } Precedence;
@@ -343,6 +345,24 @@ static AstExpr *parse_call(Parser *parser, AstExpr *left) {
   da_free(args);
 
   return call_expr;
+}
+
+// expression 'as' type  -- the 'as' is already consumed.
+static AstExpr *parse_cast(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+  SourceLoc start_loc = parser->previous.loc;
+
+  AstType *type = parse_type(parser);
+  if (!type) {
+    error_at(parser, parser->current, "Expected type after 'as'.");
+    return NULL;
+  }
+
+  AstExpr *cast_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_CAST, start_loc);
+  cast_expr->expr_cast.operand = left;
+  cast_expr->expr_cast.target = type;
+
+  return cast_expr;
 }
 
 // ( '-' | '!' ) expression
@@ -775,9 +795,10 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_GREATER_EQ] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_EQ] = {PREC_EQUALITY, NULL, parse_binary},
   [TOKEN_NOT_EQ] = {PREC_EQUALITY, NULL, parse_binary},
+  [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
 
   [TOKEN_ASSIGN] = {PREC_ASSIGNMENT, NULL, parse_assignment},
-  [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
+  [TOKEN_AS] = {PREC_CAST, NULL, parse_cast},
 
   [TOKEN_LPAREN] = {PREC_CALL, parse_grouping, parse_call},
 };

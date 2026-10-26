@@ -52,7 +52,9 @@
                                 \
   X(TOKEN_IF, "if")             \
   X(TOKEN_ELSE, "else")         \
-  X(TOKEN_WHILE, "while")
+  X(TOKEN_WHILE, "while")       \
+                                \
+  X(TOKEN_AS, "as")
 
 #define TOKEN_LIST(X) \
   TOKENS_SPECIAL(X)   \

@@ -399,13 +399,41 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   return TYPE_error;
 }
 
-// Types a cast node
+// Types a cast node. Implicit casts are created by sema_coerce() with their type already set.
 static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
   if (expr->expr_cast.implicit) {
     return sema_expr_type(ctx, expr);
   }
 
-  sema_error(ctx, expr->loc, "Explicit casts are not supported yet");
+  assert(expr->expr_cast.target && "Missing cast target");
+
+  AstExpr *operand = expr->expr_cast.operand;
+  Type *from = sema_expr(ctx, operand);
+  Type *to = sema_type(ctx, expr->expr_cast.target);
+
+  if (from == TYPE_error || to == TYPE_error) {
+    return to;
+  }
+
+  bool from_is_value = type_is_numeric(from) || from == TYPE_bool;
+
+  if (from_is_value && type_is_numeric(to)) {
+    if (type_is_untyped(from)) {
+      sema_concretize(ctx, operand, type_can_widen_to(from, to) ? to : type_default(from));
+    }
+    return to;
+  }
+
+  if (from == to && from != TYPE_void) {
+    return to;
+  }
+
+  if (to == TYPE_bool && type_is_numeric(from)) {
+    sema_error(ctx, expr->loc, "Cannot cast from '%s' to 'bool'. Use x != 0", from->name);
+    return TYPE_error;
+  }
+
+  sema_error(ctx, expr->loc, "Cannot cast from '%s' to '%s'", from->name, to->name);
   return TYPE_error;
 }
 
@@ -637,6 +665,7 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
 
   Type *func_type = arena_alloc(&ctx->comp_unit->arena, sizeof(Type));
   func_type->kind = TYPE_KIND_FUNCTION;
+  func_type->name = "Function";
 
   func_type->function.return_type = return_type;
   func_type->function.param_count = decl->decl_function.param_count;

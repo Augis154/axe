@@ -314,6 +314,9 @@ void debug_print_ir_function(IrFunction *ir_func) {
     case IR_OP_ITOF:
       printf("%zu: r%u = ITOF r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
+    case IR_OP_FTOI:
+      printf("%zu: r%u = FTOI r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
 
     case IR_OP_SEXT:
       printf("%zu: r%u = SEXT r%u\n", i, inst->res.id, inst->arg1.id);

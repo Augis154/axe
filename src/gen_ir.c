@@ -75,41 +75,37 @@ static inline bool ir_type_is_float(IrType type) {
   return type == IR_TYPE_F32 || type == IR_TYPE_F64;
 }
 
-static IrReg emit_conversion(IrGenContext *ctx, IrOp op, IrReg src_reg, Type *to_type) {
-  IrReg dest_reg = next_reg(ctx, to_type);
+// IR op that converts a value of IR type `from` to IR type `to`.
+static IrOp conversion_op(IrType from, IrType to) {
+  bool from_float = ir_type_is_float(from);
+  bool to_float = ir_type_is_float(to);
 
-  IrInstr inst = {
-    .op = op,
-    .res = dest_reg,
-    .arg1 = src_reg,
-  };
-  emit_ir_instr(ctx, inst);
-
-  return dest_reg;
+  if (!from_float && !to_float) return from == IR_TYPE_I32 ? IR_OP_SEXT : IR_OP_TRUNC;
+  if (!from_float) return IR_OP_ITOF;
+  if (to_float) return from == IR_TYPE_F32 ? IR_OP_FEXT : IR_OP_FTRUNC;
+  return IR_OP_FTOI;
 }
 
 static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
   IrType from_ir = get_ir_type(from_type);
   IrType to_ir = get_ir_type(to_type);
 
-  if (from_ir == to_ir || from_ir == IR_TYPE_NONE || to_ir == IR_TYPE_NONE) {
+  if (from_ir == to_ir) {
     return src_reg;
   }
 
-  if (!ir_type_is_float(from_ir) && !ir_type_is_float(to_ir)) {
-    return emit_conversion(ctx, from_ir == IR_TYPE_I32 ? IR_OP_SEXT : IR_OP_TRUNC, src_reg, to_type);
-  }
+  assert(from_ir != IR_TYPE_NONE && to_ir != IR_TYPE_NONE && "cast between non-value types");
 
-  if (!ir_type_is_float(from_ir)) {
-    return emit_conversion(ctx, IR_OP_ITOF, src_reg, to_type);
-  }
+  IrReg dest_reg = next_reg(ctx, to_type);
 
-  if (ir_type_is_float(to_ir)) {
-    return emit_conversion(ctx, from_ir == IR_TYPE_F32 ? IR_OP_FEXT : IR_OP_FTRUNC, src_reg, to_type);
-  }
+  IrInstr inst = {
+    .op = conversion_op(from_ir, to_ir),
+    .res = dest_reg,
+    .arg1 = src_reg,
+  };
+  emit_ir_instr(ctx, inst);
 
-  fprintf(stderr, "emit_cast_if_needed: float to integer conversion is not supported\n");
-  exit(EXIT_FAILURE);
+  return dest_reg;
 }
 
 // Expression handling

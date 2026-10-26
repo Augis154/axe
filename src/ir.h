@@ -38,6 +38,7 @@ typedef enum {
   IR_OP_RETURN,
 
   IR_OP_ITOF,
+  IR_OP_FTOI,
   IR_OP_SEXT,
   IR_OP_ZEXT,
   IR_OP_TRUNC,
