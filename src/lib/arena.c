@@ -80,3 +80,13 @@ char *arena_strndup(Arena *a, const char *str, size_t len) {
   copy[len] = '\0';
   return copy;
 }
+
+void *arena_copy_array(Arena *a, const void *src, size_t count, size_t elem_size) {
+  if (count == 0) {
+    return NULL;
+  }
+
+  void *copy = arena_alloc(a, count * elem_size);
+  memcpy(copy, src, count * elem_size);
+  return copy;
+}

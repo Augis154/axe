@@ -20,7 +20,7 @@ $(BUILD_DIR):
 
 	mkdir -p $(patsubst src/%,$(BUILD_DIR)/%,$(sort $(dir $(SRC))))
 
-.PHONY: clean
+.PHONY: all clean compile format
 
 clean:
 	rm -r $(BUILD_DIR)
@@ -31,4 +31,4 @@ compile: all
 	gcc out.s -o out
 
 format:
-	clang-format -i src/**/*.c src/**/*.h
+	find src -name '*.[ch]' | xargs clang-format -i

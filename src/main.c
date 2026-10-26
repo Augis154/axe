@@ -19,6 +19,11 @@ int main(int argc, char **argv) {
 
   cu_read_source_file(&comp_unit, "test.axe");
 
+  if (comp_unit.had_error) {
+    cu_free(&comp_unit);
+    return 1;
+  }
+
   // Lexer lexer;
   // lexer_init(&lexer, &comp_unit);
 
@@ -37,6 +42,11 @@ int main(int argc, char **argv) {
   parser_init(&parser, &comp_unit);
 
   AstProgram *program = parse_program(&parser);
+
+  if (comp_unit.had_error) {
+    cu_free(&comp_unit);
+    return 1;
+  }
 
   SemaContext sema_ctx;
   sema_init(&sema_ctx, &comp_unit);

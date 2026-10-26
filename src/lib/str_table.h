@@ -25,6 +25,7 @@ typedef struct STNode {
 typedef struct {
   STNode *nodes;
   size_t size;
+  size_t tombstones;
   size_t capacity;
 } StrTable;
 

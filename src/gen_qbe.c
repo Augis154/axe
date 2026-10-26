@@ -90,7 +90,7 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
   case IR_INST_CMP_GT:
   case IR_INST_CMP_LE:
   case IR_INST_CMP_GE: {
-    static const char *cmp_names[] = {
+    static const char *int_cmp_names[] = {
       [IR_INST_CMP_EQ] = "ceq",
       [IR_INST_CMP_NE] = "cne",
       [IR_INST_CMP_LT] = "cslt",
@@ -98,9 +98,19 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
       [IR_INST_CMP_LE] = "csle",
       [IR_INST_CMP_GE] = "csge",
     };
+    static const char *float_cmp_names[] = {
+      [IR_INST_CMP_EQ] = "ceq",
+      [IR_INST_CMP_NE] = "cne",
+      [IR_INST_CMP_LT] = "clt",
+      [IR_INST_CMP_GT] = "cgt",
+      [IR_INST_CMP_LE] = "cle",
+      [IR_INST_CMP_GE] = "cge",
+    };
+
     char op_char = reg_type_char(current_func, instr.arg1);
-    fprintf(
-      file, "  %%r%u =w %s%c %%r%u, %%r%u\n", instr.res.id, cmp_names[instr.op], op_char, instr.arg1.id, instr.arg2.id);
+    const char *cmp_name = (op_char == 'f' || op_char == 'd') ? float_cmp_names[instr.op] : int_cmp_names[instr.op];
+    
+    fprintf(file, "  %%r%u =w %s%c %%r%u, %%r%u\n", instr.res.id, cmp_name, op_char, instr.arg1.id, instr.arg2.id);
     return;
   }
 
@@ -166,7 +176,7 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
     return;
   }
   case IR_INST_TRUNC:
-    // QBE auto truncates when assigning to a smaller type
+    fprintf(file, "  %%r%u =%c copy %%r%u\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
     return;
   }
 
