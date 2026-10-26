@@ -401,7 +401,7 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 
 // '{' { statement } '}'
 static AstStmt *parse_block(Parser *parser) {
-  SourceLoc block_start = parser->previous.loc;
+  SourceLoc block_start = parser->current.loc;
 
   consume(parser, TOKEN_LBRACE, "Expected '{' to start block.");
 
@@ -433,7 +433,7 @@ static AstStmt *parse_block(Parser *parser) {
 
 // expression ';'
 static AstStmt *parse_expression_statement(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   AstExpr *expr = parse_expression(parser);
 
@@ -485,7 +485,7 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
 
 // 'return' [ expression ] ';'
 static AstStmt *parse_return_statement(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_RETURN, "Expected 'return' keyword for return statement.");
 
@@ -504,7 +504,7 @@ static AstStmt *parse_return_statement(Parser *parser) {
 
 // 'break' ';'
 static AstStmt *parse_break_statement(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_BREAK, "Expected 'break' keyword for break statement.");
   consume(parser, TOKEN_SEMICOLON, "Expected ';' after 'break' statement.");
@@ -515,7 +515,7 @@ static AstStmt *parse_break_statement(Parser *parser) {
 
 // 'continue' ';'
 static AstStmt *parse_continue_statement(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_CONTINUE, "Expected 'continue' keyword for continue statement.");
   consume(parser, TOKEN_SEMICOLON, "Expected ';' after 'continue' statement.");
@@ -526,7 +526,7 @@ static AstStmt *parse_continue_statement(Parser *parser) {
 
 // 'if' expression block [ 'else' statement ]  -- the else branch is usually a block or another if.
 static AstStmt *parse_if_statement(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_IF, "Expected 'if' keyword for if statement.");
 
@@ -553,7 +553,7 @@ static AstStmt *parse_if_statement(Parser *parser) {
 
 // 'while' expression block
 static AstStmt *parse_while_statement(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_WHILE, "Expected 'while' keyword for while statement.");
 
@@ -576,7 +576,7 @@ static AstStmt *parse_while_statement(Parser *parser) {
 
 // 'fn' IDENT '(' [ IDENT ':' type { ',' IDENT ':' type } [ ',' ] ] ')' [ ':' type ] block
 static AstDecl *parse_function_declaration(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_FN, "Expected 'fn' keyword for function declaration.");
   consume(parser, TOKEN_IDENT, "Expected function name after 'fn'.");
@@ -589,7 +589,7 @@ static AstDecl *parse_function_declaration(Parser *parser) {
   AstParam *params = NULL;
 
   while (!check(parser, TOKEN_RPAREN) && !check(parser, TOKEN_EOF)) {
-    SourceLoc param_loc = parser->previous.loc;
+    SourceLoc param_loc = parser->current.loc;
 
     consume(parser, TOKEN_IDENT, "Expected parameter name in function declaration.");
     const char *param_name = parse_identifier_name(parser, parser->previous);
@@ -645,7 +645,7 @@ static AstDecl *parse_function_declaration(Parser *parser) {
 
 // IDENT  -- a named type such as i32.
 static AstType *parse_named_type(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_IDENT, "Expected type name for named type.");
 
@@ -660,7 +660,7 @@ static AstType *parse_named_type(Parser *parser) {
 
 // '*' type
 static AstType *parse_pointer_type(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
+  SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_STAR, "Expected '*' for pointer type.");
 

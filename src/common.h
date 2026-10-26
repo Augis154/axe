@@ -1,9 +1,17 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <assert.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #define UNUSED(x) ((void)(x))
+
+#if defined(__GNUC__) || defined(__clang__)
+#define UNREACHABLE(message) (assert(0 && message), __builtin_unreachable())
+#else
+#define UNREACHABLE(message) (assert(0 && message), abort())
+#endif
 
 typedef struct AstExpr_ AstExpr;
 typedef struct AstStmt_ AstStmt;
