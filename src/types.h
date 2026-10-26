@@ -5,15 +5,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define TYPES_BUILTIN(X)  \
-  X(TYPE_ERROR, 0, error) \
-  X(TYPE_VOID, 0, void)   \
-                          \
-  X(TYPE_I32, 4, i32)     \
-  X(TYPE_I64, 8, i64)     \
-  X(TYPE_F32, 4, f32)     \
-  X(TYPE_F64, 8, f64)     \
-                          \
+#define TYPES_BUILTIN(X)                  \
+  X(TYPE_ERROR, 0, error)                 \
+  X(TYPE_VOID, 0, void)                   \
+  X(TYPE_UNTYPED_INT, 8, untyped_int)     \
+  X(TYPE_UNTYPED_FLOAT, 8, untyped_float) \
+                                          \
+  X(TYPE_I32, 4, i32)                     \
+  X(TYPE_I64, 8, i64)                     \
+  X(TYPE_F32, 4, f32)                     \
+  X(TYPE_F64, 8, f64)                     \
+                                          \
   X(TYPE_BOOL, 1, bool)
 
 typedef enum {
@@ -56,5 +58,9 @@ bool type_is_orderable(Type *type);
 bool type_is_comparable(Type *type);
 
 bool type_equals(Type *a, Type *b);
+
+bool type_can_widen_to(Type *from, Type *to);
+
+Type *get_widened_numeric_type(Type *a, Type *b);
 
 #endif // TYPES_H

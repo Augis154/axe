@@ -1,5 +1,3 @@
-#include "ast.h"
-
 #include "ir.h"
 #include "lib/array.h"
 #include "sema.h"
@@ -9,8 +7,48 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static IrType get_ir_type(Type *type) {
+  if (!type) return IR_TYPE_WORD;
+
+  switch (type->kind) {
+  case TYPE_I32:
+    return IR_TYPE_WORD;
+  case TYPE_I64:
+    return IR_TYPE_LONG;
+
+  case TYPE_F32:
+    return IR_TYPE_SPF;
+  case TYPE_F64:
+    return IR_TYPE_DPF;
+
+  case TYPE_BOOL:
+    return IR_TYPE_WORD;
+
+  case TYPE_ERROR:
+  case TYPE_VOID:
+  case TYPE_FUNCTION:
+  case TYPE_UNTYPED_INT:
+  case TYPE_UNTYPED_FLOAT:
+    return IR_TYPE_NONE;
+  }
+
+  return IR_TYPE_WORD;
+}
+
 static inline IrFunction *get_current_func(IrContext *ctx) {
   return &ctx->module->functions[ctx->current_func_idx];
+}
+
+static IrReg next_reg(IrContext *ctx, Type *type) {
+  IrFunction *current_func = get_current_func(ctx);
+  IrReg reg = (IrReg){.id = (ctx)->next_reg++};
+  da_append(current_func->reg_types, get_ir_type(type));
+  return reg;
+}
+
+static IrLabel next_label(IrContext *ctx) {
+  IrLabel label = (IrLabel){.id = (ctx)->next_label++};
+  return label;
 }
 
 static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
@@ -30,42 +68,45 @@ static void emit_ir_instr(IrContext *ctx, IrInstr instr) {
   }
 }
 
-static IrType get_ir_type(Type *type) {
-  if (!type) return IR_TYPE_WORD;
-
-  switch (type->kind) {
-  case TYPE_I32:
-    return IR_TYPE_WORD;
-  case TYPE_I64:
-    return IR_TYPE_LONG;
-
-  case TYPE_F32:
-    return IR_TYPE_SPF;
-  case TYPE_F64:
-    return IR_TYPE_DPF;
-
-  case TYPE_BOOL:
-    return IR_TYPE_WORD;
-
-  case TYPE_FUNCTION:
-  case TYPE_ERROR:
-  case TYPE_VOID:
-    return IR_TYPE_NONE;
+static IrReg emit_cast_if_needed(IrContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
+  if (type_equals(from_type, to_type)) {
+    return src_reg;
   }
 
-  return IR_TYPE_WORD;
-}
+  IrType from_ir = get_ir_type(from_type);
+  IrType to_ir = get_ir_type(to_type);
 
-static IrReg next_reg(IrContext *ctx, Type *type) {
-  IrFunction *current_func = get_current_func(ctx);
-  IrReg reg = (IrReg){.id = (ctx)->next_reg++};
-  da_append(current_func->reg_types, get_ir_type(type));
-  return reg;
-}
+  if (from_ir == to_ir) {
+    return src_reg;
+  }
 
-static IrLabel next_label(IrContext *ctx) {
-  IrLabel label = (IrLabel){.id = (ctx)->next_label++};
-  return label;
+  // Widening
+  if (to_type->size > from_type->size) {
+    IrReg dest_reg = next_reg(ctx, to_type);
+
+    IrInstr inst = {
+      .op = IR_INST_SEXT,
+      .res = dest_reg,
+      .arg1 = src_reg,
+    };
+    emit_ir_instr(ctx, inst);
+    return dest_reg;
+  }
+
+  // Narrowing
+  if (to_type->size < from_type->size) {
+    IrReg dest_reg = next_reg(ctx, to_type);
+
+    IrInstr inst = {
+      .op = IR_INST_TRUNC,
+      .res = dest_reg,
+      .arg1 = src_reg,
+    };
+    emit_ir_instr(ctx, inst);
+    return dest_reg;
+  }
+
+  return src_reg;
 }
 
 // Expression handling
@@ -333,6 +374,11 @@ static void emit_stmt_return(IrContext *ctx, AstStmt *stmt) {
 
   IrReg value = emit_expression(ctx, stmt->stmt_return.value);
 
+  Type *actual_type = ctx->sema_ctx->expr_types[stmt->stmt_return.value->id];
+  Type *expected_type = ctx->current_func_sym->type->function.return_type;
+
+  value = emit_cast_if_needed(ctx, value, actual_type, expected_type);
+
   IrInstr inst = {
     .op = IR_INST_RETURN,
     .arg1 = value,
@@ -535,7 +581,9 @@ static void emit_decl_function(IrContext *ctx, AstDecl *decl) {
 
   da_append(ir_func.reg_types, IR_TYPE_NONE);
   da_append(ctx->module->functions, ir_func);
+
   ctx->current_func_idx = da_len(ctx->module->functions) - 1;
+  ctx->current_func_sym = func_decl->symbol;
 
   uint32_t param_count = func_decl->param_count;
   IrFuncParam *params = NULL;

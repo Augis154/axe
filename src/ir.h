@@ -1,7 +1,6 @@
 #ifndef IR_H
 #define IR_H
 
-#include "ast.h"
 #include "compiler.h"
 #include "sema.h"
 
@@ -38,6 +37,10 @@ typedef enum {
 
   IR_INST_CALL,
   IR_INST_RETURN,
+
+  IR_INST_SEXT,  // Sign extend
+  IR_INST_ZEXT,  // Zero extend
+  IR_INST_TRUNC, // Truncate
 } IrOp;
 
 typedef enum {
@@ -128,6 +131,7 @@ typedef struct {
 
   IrModule *module;
   uint32_t current_func_idx;
+  Symbol *current_func_sym;
 
   uint32_t next_reg;
   uint32_t next_label;

@@ -102,9 +102,9 @@ static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type,
 static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
   switch (expr->literal.type) {
   case LITERAL_INT:
-    return TYPE_i64;
+    return TYPE_untyped_int;
   case LITERAL_FLOAT:
-    return TYPE_i64;
+    return TYPE_untyped_float;
 
   case LITERAL_CHAR:
   case LITERAL_STRING:
@@ -250,43 +250,57 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return TYPE_error;
     }
 
-    if (!type_equals(left_type, right_type)) {
+    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    if (!common_type) {
       sema_error(
-        ctx, expr->loc, "Operands must have identical types (got '%s' and '%s')", left_type->name, right_type->name);
+        ctx, expr->loc, "Incompatible types for arithmetic (got '%s' and '%s')", left_type->name, right_type->name);
       return TYPE_error;
     }
 
-    return left_type;
+    ctx->expr_types[expr->expr_binary.left->id] = common_type;
+    ctx->expr_types[expr->expr_binary.right->id] = common_type;
+
+    return common_type;
 
   case BINOP_EQEQ:
-  case BINOP_NOT_EQ:
+  case BINOP_NOT_EQ: {
     if (!type_is_comparable(left_type) || !type_is_comparable(right_type)) {
       sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", left_type->name);
       return TYPE_error;
     }
 
-    if (!type_equals(left_type, right_type)) {
-      sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
+    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    if (!common_type) {
+      sema_error(ctx, expr->loc, "Incompatible types: '%s' and '%s'", left_type->name, right_type->name);
       return TYPE_error;
     }
 
+    ctx->expr_types[expr->expr_binary.left->id] = common_type;
+    ctx->expr_types[expr->expr_binary.right->id] = common_type;
+
     return TYPE_bool;
+  }
 
   case BINOP_LESS:
   case BINOP_GREATER:
   case BINOP_LESS_EQ:
-  case BINOP_GREATER_EQ:
+  case BINOP_GREATER_EQ: {
     if (!type_is_orderable(left_type) || !type_is_orderable(right_type)) {
       sema_error(ctx, expr->loc, "Comparisons require ordered types");
       return TYPE_error;
     }
 
-    if (!type_equals(left_type, right_type)) {
-      sema_error(ctx, expr->loc, "Cannot compare different types");
+    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    if (!common_type) {
+      sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
       return TYPE_error;
     }
 
+    ctx->expr_types[expr->expr_binary.left->id] = common_type;
+    ctx->expr_types[expr->expr_binary.right->id] = common_type;
+
     return TYPE_bool;
+  }
 
   case BINOP_COUNT:
     sema_error(ctx, expr->loc, "Invalid binary operator");
@@ -368,9 +382,15 @@ static void sema_stmt_var_decl(SemaContext *ctx, AstStmt *stmt) {
     init_type = sema_expr(ctx, stmt->stmt_var_decl.init);
   }
 
-  if (expected_type && init_type && expected_type != init_type) {
-    sema_error(ctx, stmt->loc, "Variable '%s' declared type does not match initializer type", stmt->stmt_var_decl.name);
+  if (expected_type && init_type && !type_can_widen_to(init_type, expected_type)) {
+    sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, expected_type->name);
+
+    scope_insert(ctx, stmt->stmt_var_decl.name, SYMBOL_LOCAL_VAR, TYPE_error, stmt->loc);
     return;
+  }
+
+  if (expected_type && stmt->stmt_var_decl.init) {
+    ctx->expr_types[stmt->stmt_var_decl.init->id] = expected_type;
   }
 
   Type *var_type = expected_type ? expected_type : init_type;
@@ -401,10 +421,10 @@ static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
     actual_type = sema_expr(ctx, stmt->stmt_return.value);
   }
 
-  if (!type_equals(expected_type, actual_type)) {
+  if (!type_can_widen_to(actual_type, expected_type)) {
     sema_error(ctx,
                stmt->loc,
-               "Type mismatch: function '%s' expects return type '%s', but got '%s'",
+               "Function '%s' expects return type '%s', but got incompatible '%s'",
                ctx->current_function->name,
                expected_type->name,
                actual_type->name);

@@ -15,7 +15,7 @@ bool type_is_void(Type *type) {
 bool type_is_integer(Type *type) {
   if (!type) return false;
   if (type == TYPE_error) return true;
-  return type == TYPE_i64 || type == TYPE_i32;
+  return type == TYPE_i64 || type == TYPE_i32 || type == TYPE_untyped_int;
 }
 
 bool type_is_float(Type *type) {
@@ -53,4 +53,48 @@ bool type_equals(Type *a, Type *b) {
   if (!a || !b) return false;
   if (a == TYPE_error || b == TYPE_error) return true;
   return false;
+}
+
+bool type_can_widen_to(Type *from, Type *to) {
+  if (type_equals(from, to)) return true;
+  if (!from || !to) return false;
+
+  if (from == TYPE_untyped_int && type_is_integer(to)) {
+    return true;
+  }
+
+  if (type_is_integer(from) && type_is_integer(to)) {
+    return to->size >= from->size;
+  }
+
+  if (type_is_float(from) && type_is_float(to)) {
+    return to->size >= from->size;
+  }
+
+  if (type_is_integer(from) && type_is_float(to)) {
+    return to->size >= from->size;
+  }
+
+  return false;
+}
+
+Type *get_widened_numeric_type(Type *a, Type *b) {
+  if (a == b) return a;
+
+  if (a == TYPE_untyped_int && type_is_integer(b)) return b;
+  if (b == TYPE_untyped_int && type_is_integer(a)) return a;
+
+  if (type_is_integer(a) && type_is_integer(b)) {
+    return (a->size >= b->size) ? a : b;
+  }
+
+  if (type_is_float(a) || type_is_float(b)) {
+    if (type_is_float(a) && type_is_float(b)) {
+      return (a->size >= b->size) ? a : b;
+    }
+
+    return type_is_float(a) ? a : b;
+  }
+
+  return NULL;
 }

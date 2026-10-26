@@ -33,7 +33,7 @@ static inline char reg_type_char(IrFunction *fn, IrReg reg) {
 }
 
 static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
-  IrFunction *fn = &ctx->module->functions[ctx->current_func_idx];
+  IrFunction *current_func = &ctx->module->functions[ctx->current_func_idx];
 
   switch (instr.op) {
   case IR_INST_NONE:
@@ -42,24 +42,24 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
 
   // Memory & Variables
   case IR_INST_LOAD_LITERAL:
-    fprintf(file, "  %%r%u =%c copy %ld\n", instr.res.id, reg_type_char(fn, instr.res), instr.literal);
+    fprintf(file, "  %%r%u =%c copy %ld\n", instr.res.id, reg_type_char(current_func, instr.res), instr.literal);
     return;
 
   case IR_INST_LOAD_VAR:
-    fprintf(file, "  %%r%u =%c copy %%%s\n", instr.res.id, reg_type_char(fn, instr.res), instr.var_name);
+    fprintf(file, "  %%r%u =%c copy %%%s\n", instr.res.id, reg_type_char(current_func, instr.res), instr.var_name);
     return;
 
   case IR_INST_STORE_VAR:
-    fprintf(file, "  %%%s =%c copy %%r%u\n", instr.var_name, reg_type_char(fn, instr.res), instr.res.id);
+    fprintf(file, "  %%%s =%c copy %%r%u\n", instr.var_name, reg_type_char(current_func, instr.res), instr.res.id);
     return;
 
   // Unary Operations
   case IR_INST_NEGATE:
-    fprintf(file, "  %%r%u =%c neg %%r%u\n", instr.res.id, reg_type_char(fn, instr.res), instr.arg1.id);
+    fprintf(file, "  %%r%u =%c neg %%r%u\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
     return;
 
   case IR_INST_NOT:
-    fprintf(file, "  %%r%u =%c xor %%r%u, 1\n", instr.res.id, reg_type_char(fn, instr.res), instr.arg1.id);
+    fprintf(file, "  %%r%u =%c xor %%r%u, 1\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
     return;
 
   // Binary Arithmetic
@@ -76,7 +76,7 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
     fprintf(file,
             "  %%r%u =%c %s %%r%u, %%r%u\n",
             instr.res.id,
-            reg_type_char(fn, instr.res),
+            reg_type_char(current_func, instr.res),
             op_names[instr.op],
             instr.arg1.id,
             instr.arg2.id);
@@ -98,7 +98,7 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
       [IR_INST_CMP_LE] = "csle",
       [IR_INST_CMP_GE] = "csge",
     };
-    char op_char = reg_type_char(fn, instr.arg1);
+    char op_char = reg_type_char(current_func, instr.arg1);
     fprintf(
       file, "  %%r%u =w %s%c %%r%u, %%r%u\n", instr.res.id, cmp_names[instr.op], op_char, instr.arg1.id, instr.arg2.id);
     return;
@@ -131,7 +131,7 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
 
   // Function Calls
   case IR_INST_CALL: {
-    IrType ret_type = fn->reg_types[instr.res.id];
+    IrType ret_type = current_func->reg_types[instr.res.id];
 
     if (ret_type == IR_TYPE_NONE) {
       fprintf(file, "  call $%s(", instr.call.callee);
@@ -149,6 +149,25 @@ static void emit_ir_instr(FILE *file, IrContext *ctx, IrInstr instr) {
     fprintf(file, ")\n");
     return;
   }
+
+  // Type Casting
+  case IR_INST_SEXT: {
+    char to_char = reg_type_char(current_func, instr.res);
+    char from_char = reg_type_char(current_func, instr.arg1);
+
+    fprintf(file, "  %%r%u =%c exts%c %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    return;
+  }
+  case IR_INST_ZEXT: {
+    char to_char = reg_type_char(current_func, instr.res);
+    char from_char = reg_type_char(current_func, instr.arg1);
+
+    fprintf(file, "  %%r%u =%c extu%c %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    return;
+  }
+  case IR_INST_TRUNC:
+    // QBE auto truncates when assigning to a smaller type
+    return;
   }
 
   fprintf(stderr, "emit_ir_instr: unhandled IR opcode %d\n", instr.op);
