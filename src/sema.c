@@ -59,11 +59,9 @@ static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind,
 }
 
 static Symbol *scope_lookup(SemaContext *ctx, const char *name) {
-  const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
-
   for (Scope *sc = ctx->current_scope; sc != NULL; sc = sc->parent) {
     for (Symbol *sym = sc->symbols; sym != NULL; sym = sym->next) {
-      if (sym->name == interned_name) {
+      if (sym->name == name) {
         return sym;
       }
     }
@@ -73,10 +71,8 @@ static Symbol *scope_lookup(SemaContext *ctx, const char *name) {
 }
 
 static Symbol *scope_lookup_current(SemaContext *ctx, const char *name) {
-  const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
-
   for (Symbol *sym = ctx->current_scope->symbols; sym != NULL; sym = sym->next) {
-    if (sym->name == interned_name) {
+    if (sym->name == name) {
       return sym;
     }
   }
@@ -84,6 +80,8 @@ static Symbol *scope_lookup_current(SemaContext *ctx, const char *name) {
 }
 
 static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type, SourceLoc loc) {
+  name = st_intern(&ctx->comp_unit->intern_table, name);
+
   Symbol *existing = scope_lookup_current(ctx, name);
   if (existing) {
     sema_error(ctx,

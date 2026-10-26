@@ -9,6 +9,8 @@
 typedef enum {
   PREC_NONE = 0,
   PREC_ASSIGNMENT, // =
+  PREC_EQUALITY,   // == !=
+  PREC_COMPARISON, // < > <= >=
   PREC_TERM,       // + -
   PREC_FACTOR,     // * /
   PREC_UNARY,      // -
@@ -98,6 +100,41 @@ static inline bool is_lvalue(const AstExpr *node) {
     return true;
   default:
     return false;
+  }
+}
+
+// Error recovery
+
+static void synchronize(Parser *parser) {
+  parser->panic_mode = false;
+
+  while (!check(parser, TOKEN_EOF)) {
+    if (parser->current.kind == TOKEN_SEMICOLON) return;
+
+    switch (parser->next.kind) {
+    case TOKEN_CBRACE:
+    case TOKEN_FN:
+    case TOKEN_VAR:
+    case TOKEN_RETURN:
+    case TOKEN_BREAK:
+    case TOKEN_CONTINUE:
+    case TOKEN_IF:
+    case TOKEN_WHILE:
+      return;
+
+    default:
+      break;
+    }
+
+    advance(parser);
+  }
+}
+
+static void synchronize_top_level(Parser *parser) {
+  parser->panic_mode = false;
+
+  while (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_FN)) {
+    advance(parser);
   }
 }
 
@@ -257,6 +294,7 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
   SourceLoc start_loc = left->loc;
 
   AstExpr *right = parse_precedence(parser, PREC_ASSIGNMENT);
+  if (!right) return NULL;
 
   AstExpr *assign_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_ASSIGN, start_loc);
   assign_expr->assignment.target = left;
@@ -266,6 +304,8 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
 }
 
 static AstExpr *parse_call(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+
   AstExpr **args = NULL;
   while (!check(parser, TOKEN_CPAREN) && !check(parser, TOKEN_EOF)) {
     AstExpr *arg = parse_expression(parser);
@@ -283,8 +323,7 @@ static AstExpr *parse_call(Parser *parser, AstExpr *left) {
   AstExpr *call_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_CALL, left->loc);
   call_expr->expr_call.callee = left;
 
-  AstExpr **arg_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstExpr *) * da_len(args));
-  memcpy(arg_array, args, sizeof(AstExpr *) * da_len(args));
+  AstExpr **arg_array = arena_copy_array(&parser->comp_unit->arena, args, da_len(args), sizeof(AstExpr *));
 
   call_expr->expr_call.arguments = arg_array;
   call_expr->expr_call.argument_count = da_len(args);
@@ -299,6 +338,7 @@ static AstExpr *parse_unary(Parser *parser) {
   TokenKind operator = parser->current.kind;
 
   AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
+  if (!op_expr) return NULL;
 
   AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_UNARY, start_loc);
   unary_expr->expr_unary.op = get_unary_op(operator);
@@ -313,6 +353,7 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
 
   const ParseRule *rule = get_rule(operator);
   AstExpr *right = parse_precedence(parser, rule->precedence + 1);
+  if (!left || !right) return NULL;
 
   AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->arena, EXPR_BINARY, start_loc);
   binary_expr->expr_binary.op = get_binary_op(operator);
@@ -336,14 +377,17 @@ static AstStmt *parse_block(Parser *parser) {
     if (stmt) {
       da_append(stmts, stmt);
     }
+
+    if (parser->panic_mode) {
+      synchronize(parser);
+    }
   }
 
   consume(parser, TOKEN_CBRACE, "Expected '}' to end block.");
 
   AstStmt *block_stmt = ast_stmt_new(&parser->comp_unit->arena, STMT_BLOCK, block_start);
 
-  AstStmt **stmt_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstStmt *) * da_len(stmts));
-  memcpy(stmt_array, stmts, sizeof(AstStmt *) * da_len(stmts));
+  AstStmt **stmt_array = arena_copy_array(&parser->comp_unit->arena, stmts, da_len(stmts), sizeof(AstStmt *));
 
   block_stmt->stmt_block.statements = stmt_array;
   block_stmt->stmt_block.count = da_len(stmts);
@@ -545,8 +589,9 @@ static AstDecl *parse_function_declaration(Parser *parser) {
   decl->decl_function.body = func_body;
   decl->decl_function.return_type = return_type;
 
-  AstFuncParam *param_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstFuncParam) * da_len(params));
-  memcpy(param_array, params, sizeof(AstFuncParam) * da_len(params));
+  AstFuncParam *param_array =
+    arena_copy_array(&parser->comp_unit->arena, params, da_len(params), sizeof(AstFuncParam));
+  
   decl->decl_function.params = param_array;
   decl->decl_function.param_count = da_len(params);
   da_free(params);
@@ -606,6 +651,9 @@ AstStmt *parse_statement(Parser *parser) {
   case TOKEN_VAR:
     return parse_variable_declaration(parser);
   case TOKEN_FN:
+    error_at(parser, parser->next, "Nested functions are not supported.");
+    parse_function_declaration(parser);
+    return NULL;
 
   case TOKEN_RETURN:
     return parse_return_statement(parser);
@@ -631,6 +679,7 @@ AstDecl *parse_declaration(Parser *parser) {
 
   default:
     error_at(parser, parser->next, "Expected declaration.");
+    synchronize_top_level(parser);
   }
 
   return NULL;
@@ -660,12 +709,15 @@ AstProgram *parse_program(Parser *parser) {
     if (decl) {
       da_append(decls, decl);
     }
+
+    if (parser->panic_mode) {
+      synchronize_top_level(parser);
+    }
   }
 
   AstProgram *program = arena_alloc(&parser->comp_unit->arena, sizeof(AstProgram));
 
-  AstDecl **decl_array = arena_alloc(&parser->comp_unit->arena, sizeof(AstDecl *) * da_len(decls));
-  memcpy(decl_array, decls, sizeof(AstDecl *) * da_len(decls));
+  AstDecl **decl_array = arena_copy_array(&parser->comp_unit->arena, decls, da_len(decls), sizeof(AstDecl *));
 
   program->decls = decl_array;
   program->decl_count = da_len(decls);
@@ -687,12 +739,12 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
   [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
 
-  [TOKEN_LESS] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_GREATER] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_NOT_EQ] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_EQEQ] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_LESS_EQ] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_GREATER_EQ] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_LESS] = {PREC_COMPARISON, NULL, parse_binary},
+  [TOKEN_GREATER] = {PREC_COMPARISON, NULL, parse_binary},
+  [TOKEN_LESS_EQ] = {PREC_COMPARISON, NULL, parse_binary},
+  [TOKEN_GREATER_EQ] = {PREC_COMPARISON, NULL, parse_binary},
+  [TOKEN_NOT_EQ] = {PREC_EQUALITY, NULL, parse_binary},
+  [TOKEN_EQEQ] = {PREC_EQUALITY, NULL, parse_binary},
 
   [TOKEN_EQUAL] = {PREC_ASSIGNMENT, NULL, parse_assignment},
   [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},

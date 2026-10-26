@@ -372,12 +372,16 @@ static void emit_stmt_var_decl(IrContext *ctx, AstStmt *stmt) {
 static void emit_stmt_return(IrContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_return: stmt is NULL");
 
-  IrReg value = emit_expression(ctx, stmt->stmt_return.value);
+  IrReg value = NULL_REG;
 
-  Type *actual_type = ctx->sema_ctx->expr_types[stmt->stmt_return.value->id];
-  Type *expected_type = ctx->current_func_sym->type->function.return_type;
+  if (stmt->stmt_return.value) {
+    value = emit_expression(ctx, stmt->stmt_return.value);
 
-  value = emit_cast_if_needed(ctx, value, actual_type, expected_type);
+    Type *actual_type = ctx->sema_ctx->expr_types[stmt->stmt_return.value->id];
+    Type *expected_type = ctx->current_func_sym->type->function.return_type;
+
+    value = emit_cast_if_needed(ctx, value, actual_type, expected_type);
+  }
 
   IrInstr inst = {
     .op = IR_INST_RETURN,
@@ -451,14 +455,6 @@ static void emit_stmt_if(IrContext *ctx, AstStmt *stmt) {
     emit_ir_instr(ctx, else_label_instr);
 
     emit_statement(ctx, stmt->stmt_if.else_branch);
-
-    if (!ctx->block_terminated) {
-      IrInstr end_label_instr = {
-        .op = IR_INST_LABEL,
-        .target = end_label,
-      };
-      emit_ir_instr(ctx, end_label_instr);
-    }
   }
 
   IrInstr end_label_instr = {

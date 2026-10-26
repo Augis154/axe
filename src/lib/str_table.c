@@ -1,6 +1,7 @@
 #include "str_table.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,6 +44,7 @@ static void resize(StrTable *st, size_t new_capacity) {
   st->nodes = new_nodes;
   st->capacity = new_capacity;
   st->size = 0;
+  st->tombstones = 0;
 
   for (size_t i = 0; i < old_capacity; i++) {
     STNode *node = &old_nodes[i];
@@ -62,7 +64,7 @@ static void resize(StrTable *st, size_t new_capacity) {
   free(old_nodes);
 }
 
-static STNode *find_entry(STNode *nodes, size_t capacity, const char *key, size_t len, uint32_t hash) {
+static STNode *find_entry(STNode *nodes, size_t capacity, const char *key, size_t len, hash_t hash) {
   size_t idx = (size_t)(hash & (capacity - 1));
   STNode *tombstone = NULL;
 
@@ -91,8 +93,9 @@ static void ensure_capacity(StrTable *st) {
     return;
   }
 
-  if ((double)(st->size + 1) / (double)st->capacity >= MAX_LOAD_FACTOR) {
-    resize(st, st->capacity * 2);
+  if ((double)(st->size + st->tombstones + 1) / (double)st->capacity >= MAX_LOAD_FACTOR) {
+    bool need_growth = (double)(st->size + 1) / (double)st->capacity >= MAX_LOAD_FACTOR / 2;
+    resize(st, need_growth ? st->capacity * 2 : st->capacity);
   }
 }
 
@@ -109,6 +112,7 @@ void st_init(StrTable *st, size_t initial_cap) {
 
   st->capacity = cap;
   st->size = 0;
+  st->tombstones = 0;
 }
 
 void st_free(StrTable *st) {
@@ -126,6 +130,7 @@ void st_free(StrTable *st) {
   free(st->nodes);
   st->nodes = NULL;
   st->size = 0;
+  st->tombstones = 0;
   st->capacity = 0;
 }
 
@@ -136,10 +141,12 @@ void st_set_len(StrTable *st, const char *key, size_t len, void *value) {
 
   ensure_capacity(st);
 
-  uint32_t hash = hash_str(key, len);
+  hash_t hash = hash_str(key, len);
   STNode *node = find_entry(st->nodes, st->capacity, key, len, hash);
 
   if (node->key == NULL || node->key == TOMBSTONE) {
+    if (node->key == TOMBSTONE) st->tombstones--;
+
     char *key_copy = dup_str(key, len);
     assert(key_copy != NULL && "Memory allocation in st_set_len failed");
 
@@ -156,7 +163,7 @@ void *st_get_len(StrTable *st, const char *key, size_t len) {
     return NULL;
   }
 
-  uint32_t hash = hash_str(key, len);
+  hash_t hash = hash_str(key, len);
   STNode *node = find_entry(st->nodes, st->capacity, key, len, hash);
 
   if (!node || node->key == NULL || node->key == TOMBSTONE) {
@@ -171,7 +178,7 @@ void *st_remove_len(StrTable *st, const char *key, size_t len) {
     return NULL;
   }
 
-  uint32_t hash = hash_str(key, len);
+  hash_t hash = hash_str(key, len);
   STNode *node = find_entry(st->nodes, st->capacity, key, len, hash);
 
   if (!node || node->key == NULL || node->key == TOMBSTONE) {
@@ -184,6 +191,7 @@ void *st_remove_len(StrTable *st, const char *key, size_t len) {
   node->key = TOMBSTONE;
   node->value = NULL;
   st->size--;
+  st->tombstones++;
 
   return value;
 }
@@ -195,12 +203,14 @@ const char *st_intern_len(StrTable *st, const char *key, size_t len) {
 
   ensure_capacity(st);
 
-  uint32_t hash = hash_str(key, len);
+  hash_t hash = hash_str(key, len);
   STNode *node = find_entry(st->nodes, st->capacity, key, len, hash);
 
   if (node->key != NULL && node->key != TOMBSTONE) {
     return node->key;
   }
+
+  if (node->key == TOMBSTONE) st->tombstones--;
 
   char *interned = dup_str(key, len);
   assert(interned != NULL && "Memory allocation in st_intern_len failed");

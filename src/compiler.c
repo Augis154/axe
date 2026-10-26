@@ -10,6 +10,8 @@ void cu_init(CompilationUnit *comp_unit) {
   comp_unit->source = NULL;
   comp_unit->source_len = 0;
 
+  comp_unit->arena = (Arena){0};
+
   st_init(&comp_unit->intern_table, 1024);
   st_init(&comp_unit->symbol_table, 1024);
 
@@ -38,14 +40,31 @@ void cu_read_source_file(CompilationUnit *comp_unit, const char *filename) {
     return;
   }
 
-  fseek(file, 0, SEEK_END);
-  size_t file_size = ftell(file);
-  fseek(file, 0, SEEK_SET);
+  long end_pos = -1;
+  if (fseek(file, 0, SEEK_END) == 0) {
+    end_pos = ftell(file);
+  }
+
+  if (end_pos < 0 || fseek(file, 0, SEEK_SET) != 0) {
+    fprintf(stderr, "Error: Could not determine size of file '%s'\n", filename);
+    fclose(file);
+    comp_unit->had_error = true;
+    return;
+  }
+
+  size_t file_size = (size_t)end_pos;
 
   char *buffer = (char *)malloc(file_size + 1);
   assert(buffer != NULL && "Memory allocation failed for source buffer");
 
-  fread(buffer, 1, file_size, file);
+  if (fread(buffer, 1, file_size, file) != file_size) {
+    fprintf(stderr, "Error: Could not read file '%s'\n", filename);
+    free(buffer);
+    fclose(file);
+    comp_unit->had_error = true;
+    return;
+  }
+  
   buffer[file_size] = '\0';
 
   fclose(file);

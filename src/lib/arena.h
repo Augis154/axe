@@ -33,8 +33,10 @@ ArenaMark arena_mark(Arena *a);
 void arena_rollback(Arena *a, ArenaMark mark);
 
 char *arena_strndup(Arena *a, const char *str, size_t len);
-inline char *arena_strdup(Arena *a, const char *str) {
+static inline char *arena_strdup(Arena *a, const char *str) {
   return arena_strndup(a, str, strlen(str));
 }
+
+void *arena_copy_array(Arena *a, const void *src, size_t count, size_t elem_size);
 
 #endif // ARENA_H
