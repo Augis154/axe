@@ -4,6 +4,7 @@
 #include "common.h"
 #include "lib/arena.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -43,6 +44,8 @@ typedef enum {
 
   AST_EXPR_UNARY,
   AST_EXPR_BINARY,
+
+  AST_EXPR_CAST,
 } AstExprKind;
 
 typedef enum {
@@ -89,6 +92,12 @@ typedef struct {
   AstExpr *right;
 } AstExprBinary;
 
+typedef struct {
+  AstExpr *operand;
+  AstType *target;
+  bool implicit;
+} AstExprCast;
+
 struct AstExpr_ {
   AstExprKind kind;
   uint32_t id;
@@ -103,6 +112,8 @@ struct AstExpr_ {
 
     AstExprUnary expr_unary;
     AstExprBinary expr_binary;
+
+    AstExprCast expr_cast;
   };
 };
 

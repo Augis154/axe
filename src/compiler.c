@@ -1,6 +1,11 @@
 #include "compiler.h"
 
+#include "gen_ir.h"
+#include "gen_qbe.h"
 #include "lib/arena.h"
+#include "parser.h"
+#include "sema.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,4 +76,46 @@ void cu_read_source_file(CompilationUnit *comp_unit, const char *filename) {
 
   comp_unit->source = buffer;
   comp_unit->source_len = file_size;
+}
+
+bool compile_file(const char *input_path, const char *output_path) {
+  CompilationUnit comp_unit;
+  cu_init(&comp_unit);
+
+  cu_read_source_file(&comp_unit, input_path);
+  if (comp_unit.had_error) {
+    cu_free(&comp_unit);
+    return false;
+  }
+
+  Parser parser;
+  parser_init(&parser, &comp_unit);
+
+  AstProgram *program = parse_program(&parser);
+  if (comp_unit.had_error) {
+    cu_free(&comp_unit);
+    return false;
+  }
+
+  SemaContext sema_ctx;
+  sema_init(&sema_ctx, &comp_unit);
+
+  sema_program(&sema_ctx, program);
+  if (comp_unit.had_error) {
+    sema_free(&sema_ctx);
+    cu_free(&comp_unit);
+    return false;
+  }
+
+  IrGenContext ir_context;
+  gen_ir_init(&ir_context, &comp_unit, &sema_ctx);
+  gen_ir(&ir_context, program);
+
+  bool ok = generate_qbe(output_path, ir_context.module);
+
+  gen_ir_free(&ir_context);
+  sema_free(&sema_ctx);
+  cu_free(&comp_unit);
+
+  return ok;
 }

@@ -9,6 +9,7 @@ typedef enum {
   IR_OP_NONE = 0,
 
   IR_OP_LOAD_LITERAL,
+  IR_OP_LOAD_FLOAT,
 
   IR_OP_LOAD_VAR,
   IR_OP_STORE_VAR,
@@ -36,9 +37,12 @@ typedef enum {
   IR_OP_CALL,
   IR_OP_RETURN,
 
-  IR_OP_SEXT,  // Sign extend
-  IR_OP_ZEXT,  // Zero extend
-  IR_OP_TRUNC, // Truncate
+  IR_OP_ITOF,
+  IR_OP_SEXT,
+  IR_OP_ZEXT,
+  IR_OP_TRUNC,
+  IR_OP_FEXT,
+  IR_OP_FTRUNC,
 } IrOp;
 
 typedef enum {
@@ -46,8 +50,8 @@ typedef enum {
 
   IR_TYPE_I32,
   IR_TYPE_I64,
-  IR_TYPE_F32, // Single-precision float
-  IR_TYPE_F64, // Double-precision float
+  IR_TYPE_F32,
+  IR_TYPE_F64,
 } IrType;
 
 typedef struct {
@@ -85,6 +89,7 @@ typedef struct {
     };
 
     int64_t literal;
+    double float_literal;
 
     const char *var_name;
 

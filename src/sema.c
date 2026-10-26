@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "lib/arena.h"
+#include "lib/array.h"
 #include "lib/str_table.h"
 #include "types.h"
 
@@ -97,6 +98,75 @@ static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type,
   return scope_insert(ctx, name, SYMBOL_TYPE, type, loc);
 }
 
+// Expression types
+
+Type *sema_expr_type(const SemaContext *ctx, const AstExpr *expr) {
+  return expr->id < da_len(ctx->expr_types) ? ctx->expr_types[expr->id] : NULL;
+}
+
+// Nodes created during sema (implicit casts) have ids past the table, so it grows on demand.
+static void sema_set_expr_type(SemaContext *ctx, const AstExpr *expr, Type *type) {
+  size_t old_len = da_len(ctx->expr_types);
+
+  if (expr->id >= old_len) {
+    da_set_len(ctx->expr_types, expr->id + 1);
+    for (size_t i = old_len; i < da_len(ctx->expr_types); i++) {
+      ctx->expr_types[i] = NULL;
+    }
+  }
+
+  ctx->expr_types[expr->id] = type;
+}
+
+// Implicit conversions
+
+// Gives an untyped expression (and the untyped operands it is built from) a concrete type.
+static void sema_concretize(SemaContext *ctx, AstExpr *expr, Type *target) {
+  if (!type_is_untyped(sema_expr_type(ctx, expr))) {
+    return;
+  }
+
+  sema_set_expr_type(ctx, expr, target);
+
+  switch (expr->kind) {
+  case AST_EXPR_UNARY:
+    sema_concretize(ctx, expr->expr_unary.operand, target);
+    break;
+
+  case AST_EXPR_BINARY:
+    sema_concretize(ctx, expr->expr_binary.left, target);
+    sema_concretize(ctx, expr->expr_binary.right, target);
+    break;
+
+  default:
+    break;
+  }
+}
+
+// Makes `*slot` usable as `to`: untyped expressions take the concrete type, others get an implicit cast node.
+static void sema_coerce(SemaContext *ctx, AstExpr **slot, Type *to) {
+  AstExpr *expr = *slot;
+  Type *from = sema_expr_type(ctx, expr);
+
+  if (from == TYPE_error || to == TYPE_error) {
+    return;
+  }
+
+  if (type_is_untyped(from)) {
+    sema_concretize(ctx, expr, type_default(to));
+    return;
+  }
+
+  if (from != to) {
+    AstExpr *cast = ast_expr_new(&ctx->comp_unit->arena, AST_EXPR_CAST, expr->loc);
+    cast->expr_cast.operand = expr;
+    cast->expr_cast.implicit = true;
+    sema_set_expr_type(ctx, cast, to);
+
+    *slot = cast;
+  }
+}
+
 // Expression semantic analysis functions
 
 // Types a literal: ints are untyped_int and floats untyped_float; char and string are not supported yet.
@@ -119,7 +189,10 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
 
 static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   Symbol *sym = scope_lookup(ctx, expr->expr_identifier.name);
-  if (sym) return sym->type;
+  if (sym) {
+    expr->expr_identifier.symbol = sym;
+    return sym->type;
+  }
 
   sema_error(ctx, expr->loc, "Undefined identifier '%s'", expr->expr_identifier.name);
 
@@ -135,10 +208,18 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
     return TYPE_error;
   }
 
-  if (target_type != value_type) {
-    sema_error(ctx, expr->loc, "Type mismatch in assignment");
+  Symbol *target_sym = expr->expr_assign.target->expr_identifier.symbol;
+  if (!target_sym || (target_sym->kind != SYMBOL_LOCAL_VAR && target_sym->kind != SYMBOL_GLOBAL_VAR)) {
+    sema_error(ctx, expr->loc, "Invalid assignment target");
     return TYPE_error;
   }
+
+  if (!type_can_widen_to(value_type, target_type)) {
+    sema_error(ctx, expr->loc, "Cannot assign '%s' to '%s'", value_type->name, target_type->name);
+    return TYPE_error;
+  }
+
+  sema_coerce(ctx, &expr->expr_assign.value, target_type);
 
   return target_type;
 }
@@ -185,7 +266,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
 
     Type *expected_type = func_type->param_types[i];
 
-    if (arg_type != expected_type) {
+    if (!type_can_widen_to(arg_type, expected_type)) {
       sema_error(ctx,
                  arg_expr->loc,
                  "Argument %zu of function '%s' expects type '%s', but got '%s'",
@@ -195,6 +276,8 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
                  arg_type->name);
       return TYPE_error;
     }
+
+    sema_coerce(ctx, &expr->expr_call.arguments[i], expected_type);
   }
 
   return func_type->return_type;
@@ -259,8 +342,11 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return TYPE_error;
     }
 
-    ctx->expr_types[expr->expr_binary.left->id] = common_type;
-    ctx->expr_types[expr->expr_binary.right->id] = common_type;
+    // Untyped operands stay untyped so a later consumer can pick the concrete type.
+    if (!type_is_untyped(common_type)) {
+      sema_coerce(ctx, &expr->expr_binary.left, common_type);
+      sema_coerce(ctx, &expr->expr_binary.right, common_type);
+    }
 
     return common_type;
 
@@ -277,8 +363,8 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return TYPE_error;
     }
 
-    ctx->expr_types[expr->expr_binary.left->id] = common_type;
-    ctx->expr_types[expr->expr_binary.right->id] = common_type;
+    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
+    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
 
     return TYPE_bool;
   }
@@ -298,8 +384,8 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return TYPE_error;
     }
 
-    ctx->expr_types[expr->expr_binary.left->id] = common_type;
-    ctx->expr_types[expr->expr_binary.right->id] = common_type;
+    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
+    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
 
     return TYPE_bool;
   }
@@ -310,6 +396,16 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   }
 
   sema_error(ctx, expr->loc, "Unknown binary operator");
+  return TYPE_error;
+}
+
+// Types a cast node
+static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
+  if (expr->expr_cast.implicit) {
+    return sema_expr_type(ctx, expr);
+  }
+
+  sema_error(ctx, expr->loc, "Explicit casts are not supported yet");
   return TYPE_error;
 }
 
@@ -343,7 +439,12 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
     result_type = sema_expr_binary(ctx, expr);
     break;
 
+  case AST_EXPR_CAST:
+    result_type = sema_expr_cast(ctx, expr);
+    break;
+
   case AST_EXPR_INVALID:
+    sema_set_expr_type(ctx, expr, TYPE_error);
     return TYPE_error;
   }
 
@@ -352,7 +453,7 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
     return TYPE_error;
   }
 
-  ctx->expr_types[expr->id] = result_type;
+  sema_set_expr_type(ctx, expr, result_type);
 
   return result_type;
 }
@@ -392,14 +493,17 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
     return;
   }
 
-  if (expected_type && stmt->stmt_local_var.init) {
-    ctx->expr_types[stmt->stmt_local_var.init->id] = expected_type;
-  }
-
-  Type *var_type = expected_type ? expected_type : init_type;
+  Type *var_type = expected_type ? expected_type : type_default(init_type);
   if (!var_type) {
     sema_error(ctx, stmt->loc, "Cannot infer type without explicit type or initializer");
     var_type = TYPE_error;
+  } else if (type_is_void(var_type)) {
+    sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type 'void'", stmt->stmt_local_var.name);
+    var_type = TYPE_error;
+  }
+
+  if (stmt->stmt_local_var.init) {
+    sema_coerce(ctx, &stmt->stmt_local_var.init, var_type);
   }
 
   Symbol *sym = scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, var_type, stmt->loc);
@@ -431,6 +535,11 @@ static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
                ctx->current_function->name,
                expected_type->name,
                actual_type->name);
+    return;
+  }
+
+  if (stmt->stmt_return.value) {
+    sema_coerce(ctx, &stmt->stmt_return.value, expected_type);
   }
 }
 
@@ -657,13 +766,17 @@ void sema_init(SemaContext *ctx, CompilationUnit *comp_unit) {
   ctx->next_symbol_id = 1;
   ctx->loop_depth = 0;
 
-  uint32_t expr_count = ast_expr_count();
-  ctx->expr_types = arena_alloc(&comp_unit->arena, sizeof(Type *) * expr_count);
-  for (size_t i = 0; i < expr_count; i++) {
-    ctx->expr_types[i] = TYPE_void;
+  ctx->expr_types = NULL;
+  da_set_len(ctx->expr_types, ast_expr_count() + 1);
+  for (size_t i = 0; i < da_len(ctx->expr_types); i++) {
+    ctx->expr_types[i] = NULL;
   }
 
   sema_init_builtins(ctx);
+}
+
+void sema_free(SemaContext *ctx) {
+  da_free(ctx->expr_types);
 }
 
 // Runs pass 1 over all declarations, then pass 2
