@@ -577,18 +577,19 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
     init_type = sema_expr(ctx, stmt->stmt_local_var.init);
   }
 
-  if (expected_type && init_type && !type_can_widen_to(init_type, expected_type)) {
-    sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, expected_type->name);
+  Type *var_type = expected_type ? expected_type : type_default(init_type);
+  assert(var_type && "the parser requires a type annotation or an initializer");
+
+  if (!type_has_storage(var_type)) {
+    sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type '%s'", stmt->stmt_local_var.name, var_type->name);
+    var_type = TYPE_error;
+  }
+
+  if (expected_type && init_type && !type_can_widen_to(init_type, var_type)) {
+    sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, var_type->name);
 
     scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, TYPE_error, stmt->loc);
     return;
-  }
-
-  Type *var_type = expected_type ? expected_type : type_default(init_type);
-  assert(var_type && "the parser requires a type annotation or an initializer");
-  if (type_is_void(var_type)) {
-    sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type 'void'", stmt->stmt_local_var.name);
-    var_type = TYPE_error;
   }
 
   if (stmt->stmt_local_var.init) {
@@ -711,6 +712,15 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
   Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * func->param_count);
   for (size_t i = 0; i < func->param_count; i++) {
     param_types[i] = sema_type(ctx, func->params[i].declared_type);
+
+    if (!type_has_storage(param_types[i])) {
+      sema_error(ctx,
+                 func->params[i].loc,
+                 "Cannot declare parameter '%s' of type '%s'",
+                 func->params[i].name,
+                 param_types[i]->name);
+      param_types[i] = TYPE_error;
+    }
   }
 
   Type *func_type = arena_alloc(&ctx->comp_unit->arena, sizeof(Type));
