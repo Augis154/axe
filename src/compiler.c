@@ -64,7 +64,7 @@ void cu_read_source_file(CompilationUnit *comp_unit, const char *filename) {
     comp_unit->had_error = true;
     return;
   }
-  
+
   buffer[file_size] = '\0';
 
   fclose(file);

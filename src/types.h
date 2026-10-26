@@ -5,25 +5,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define TYPES_BUILTIN(X)                  \
-  X(TYPE_ERROR, 0, error)                 \
-  X(TYPE_VOID, 0, void)                   \
-  X(TYPE_UNTYPED_INT, 8, untyped_int)     \
-  X(TYPE_UNTYPED_FLOAT, 8, untyped_float) \
-                                          \
-  X(TYPE_I32, 4, i32)                     \
-  X(TYPE_I64, 8, i64)                     \
-  X(TYPE_F32, 4, f32)                     \
-  X(TYPE_F64, 8, f64)                     \
-                                          \
-  X(TYPE_BOOL, 1, bool)
+#define TYPES_BUILTIN(X)                       \
+  X(TYPE_KIND_ERROR, 0, error)                 \
+  X(TYPE_KIND_VOID, 0, void)                   \
+  X(TYPE_KIND_UNTYPED_INT, 8, untyped_int)     \
+  X(TYPE_KIND_UNTYPED_FLOAT, 8, untyped_float) \
+                                               \
+  X(TYPE_KIND_I32, 4, i32)                     \
+  X(TYPE_KIND_I64, 8, i64)                     \
+  X(TYPE_KIND_F32, 4, f32)                     \
+  X(TYPE_KIND_F64, 8, f64)                     \
+                                               \
+  X(TYPE_KIND_BOOL, 1, bool)
 
 typedef enum {
-  TYPE_FUNCTION,
+  TYPE_KIND_FUNCTION,
 
 #define TYPE_ENUM(kind, size, ident) kind,
   TYPES_BUILTIN(TYPE_ENUM)
-#undef X
+#undef TYPE_ENUM
 } TypeKind;
 
 typedef struct {
