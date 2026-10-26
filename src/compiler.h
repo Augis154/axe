@@ -26,4 +26,6 @@ void cu_free(CompilationUnit *comp_unit);
 
 void cu_read_source_file(CompilationUnit *comp_unit, const char *filename);
 
+bool compile_file(const char *input_path, const char *output_path);
+
 #endif // COMPILER_H

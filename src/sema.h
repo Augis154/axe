@@ -42,11 +42,13 @@ typedef struct {
   uint32_t next_symbol_id;
   uint32_t loop_depth;
 
-  Type **type_intern_table;
   Type **expr_types;
 } SemaContext;
 
 void sema_init(SemaContext *ctx, CompilationUnit *comp_unit);
+void sema_free(SemaContext *ctx);
+
+Type *sema_expr_type(const SemaContext *ctx, const AstExpr *expr);
 
 Type *sema_expr(SemaContext *ctx, AstExpr *expr);
 void sema_stmt(SemaContext *ctx, AstStmt *stmt);

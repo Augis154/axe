@@ -17,7 +17,7 @@ static char qbe_type_char(IrType type) {
     return 'l';
 
   case IR_TYPE_F32:
-    return 'f';
+    return 's';
   case IR_TYPE_F64:
     return 'd';
   }
@@ -42,6 +42,12 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
   case IR_OP_LOAD_LITERAL:
     fprintf(file, "  %%r%u =%c copy %ld\n", instr.res.id, reg_type_char(current_func, instr.res), instr.literal);
     return;
+
+  case IR_OP_LOAD_FLOAT: {
+    char type_char = reg_type_char(current_func, instr.res);
+    fprintf(file, "  %%r%u =%c copy %c_%.17g\n", instr.res.id, type_char, type_char, instr.float_literal);
+    return;
+  }
 
   case IR_OP_LOAD_VAR:
     fprintf(file, "  %%r%u =%c copy %%%s\n", instr.res.id, reg_type_char(current_func, instr.res), instr.var_name);
@@ -106,8 +112,8 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
     };
 
     char op_char = reg_type_char(current_func, instr.arg1);
-    const char *cmp_name = (op_char == 'f' || op_char == 'd') ? float_cmp_names[instr.op] : int_cmp_names[instr.op];
-    
+    const char *cmp_name = (op_char == 's' || op_char == 'd') ? float_cmp_names[instr.op] : int_cmp_names[instr.op];
+
     fprintf(file, "  %%r%u =w %s%c %%r%u, %%r%u\n", instr.res.id, cmp_name, op_char, instr.arg1.id, instr.arg2.id);
     return;
   }
@@ -159,6 +165,14 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
   }
 
   // Type Casting
+  case IR_OP_ITOF: {
+    char to_char = reg_type_char(current_func, instr.res);
+    char from_char = reg_type_char(current_func, instr.arg1);
+
+    fprintf(file, "  %%r%u =%c s%ctof %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    return;
+  }
+
   case IR_OP_SEXT: {
     char to_char = reg_type_char(current_func, instr.res);
     char from_char = reg_type_char(current_func, instr.arg1);
@@ -175,6 +189,13 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
   }
   case IR_OP_TRUNC:
     fprintf(file, "  %%r%u =%c copy %%r%u\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
+    return;
+
+  case IR_OP_FEXT:
+    fprintf(file, "  %%r%u =d exts %%r%u\n", instr.res.id, instr.arg1.id);
+    return;
+  case IR_OP_FTRUNC:
+    fprintf(file, "  %%r%u =s truncd %%r%u\n", instr.res.id, instr.arg1.id);
     return;
   }
 

@@ -94,6 +94,12 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     printf(")");
     return;
 
+  case AST_EXPR_CAST:
+    printf("(cast ");
+    debug_print_ast_sexpr(arena, node->expr_cast.operand);
+    printf(")");
+    return;
+
   case AST_EXPR_INVALID:
     printf("<invalid expr node>");
     return;
@@ -226,6 +232,10 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: r%u = %ld\n", i, inst->res.id, inst->literal);
       continue;
 
+    case IR_OP_LOAD_FLOAT:
+      printf("%zu: r%u = %g\n", i, inst->res.id, inst->float_literal);
+      continue;
+
     case IR_OP_LOAD_VAR:
       printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var_name);
       continue;
@@ -299,6 +309,26 @@ void debug_print_ir_function(IrFunction *ir_func) {
       continue;
     case IR_OP_RETURN:
       printf("%zu: RETURN r%u\n", i, inst->arg1.id);
+      continue;
+
+    case IR_OP_ITOF:
+      printf("%zu: r%u = ITOF r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+
+    case IR_OP_SEXT:
+      printf("%zu: r%u = SEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_ZEXT:
+      printf("%zu: r%u = ZEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_TRUNC:
+      printf("%zu: r%u = TRUNC r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_FEXT:
+      printf("%zu: r%u = FEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_FTRUNC:
+      printf("%zu: r%u = FTRUNC r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
     }
 

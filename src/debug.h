@@ -2,8 +2,8 @@
 #define DEBUG_H
 
 #include "ast.h"
-#include "token.h"
 #include "ir.h"
+#include "token.h"
 
 void debug_print_token(Token token);
 

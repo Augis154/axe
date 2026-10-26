@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+#define UNUSED(x) ((void)(x))
+
 typedef struct AstExpr_ AstExpr;
 typedef struct AstStmt_ AstStmt;
 typedef struct AstDecl_ AstDecl;

@@ -49,6 +49,7 @@ TYPES_BUILTIN(TYPE_EXTERN)
 #undef TYPE_EXTERN
 
 bool type_is_void(Type *type);
+bool type_is_untyped(Type *type);
 bool type_is_integer(Type *type);
 bool type_is_float(Type *type);
 bool type_is_bool(Type *type);
@@ -59,8 +60,9 @@ bool type_is_comparable(Type *type);
 
 bool type_equals(Type *a, Type *b);
 
-bool type_can_widen_to(Type *from, Type *to);
+Type *type_default(Type *type);
 
+bool type_can_widen_to(Type *from, Type *to);
 Type *get_widened_numeric_type(Type *a, Type *b);
 
 #endif // TYPES_H

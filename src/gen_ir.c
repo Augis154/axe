@@ -24,11 +24,14 @@ static IrType get_ir_type(Type *type) {
   case TYPE_KIND_BOOL:
     return IR_TYPE_I32;
 
+  case TYPE_KIND_UNTYPED_INT:
+    return IR_TYPE_I32;
+  case TYPE_KIND_UNTYPED_FLOAT:
+    return IR_TYPE_F64;
+
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
   case TYPE_KIND_FUNCTION:
-  case TYPE_KIND_UNTYPED_INT:
-  case TYPE_KIND_UNTYPED_FLOAT:
     return IR_TYPE_NONE;
   }
 
@@ -68,50 +71,54 @@ static void emit_ir_instr(IrGenContext *ctx, IrInstr instr) {
   }
 }
 
-static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
-  if (type_equals(from_type, to_type)) {
-    return src_reg;
-  }
+static inline bool ir_type_is_float(IrType type) {
+  return type == IR_TYPE_F32 || type == IR_TYPE_F64;
+}
 
+static IrReg emit_conversion(IrGenContext *ctx, IrOp op, IrReg src_reg, Type *to_type) {
+  IrReg dest_reg = next_reg(ctx, to_type);
+
+  IrInstr inst = {
+    .op = op,
+    .res = dest_reg,
+    .arg1 = src_reg,
+  };
+  emit_ir_instr(ctx, inst);
+
+  return dest_reg;
+}
+
+static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
   IrType from_ir = get_ir_type(from_type);
   IrType to_ir = get_ir_type(to_type);
 
-  if (from_ir == to_ir) {
+  if (from_ir == to_ir || from_ir == IR_TYPE_NONE || to_ir == IR_TYPE_NONE) {
     return src_reg;
   }
 
-  // Widening
-  if (to_type->size > from_type->size) {
-    IrReg dest_reg = next_reg(ctx, to_type);
-
-    IrInstr inst = {
-      .op = IR_OP_SEXT,
-      .res = dest_reg,
-      .arg1 = src_reg,
-    };
-    emit_ir_instr(ctx, inst);
-    return dest_reg;
+  if (!ir_type_is_float(from_ir) && !ir_type_is_float(to_ir)) {
+    return emit_conversion(ctx, from_ir == IR_TYPE_I32 ? IR_OP_SEXT : IR_OP_TRUNC, src_reg, to_type);
   }
 
-  // Narrowing
-  if (to_type->size < from_type->size) {
-    IrReg dest_reg = next_reg(ctx, to_type);
-
-    IrInstr inst = {
-      .op = IR_OP_TRUNC,
-      .res = dest_reg,
-      .arg1 = src_reg,
-    };
-    emit_ir_instr(ctx, inst);
-    return dest_reg;
+  if (!ir_type_is_float(from_ir)) {
+    return emit_conversion(ctx, IR_OP_ITOF, src_reg, to_type);
   }
 
-  return src_reg;
+  if (ir_type_is_float(to_ir)) {
+    return emit_conversion(ctx, from_ir == IR_TYPE_F32 ? IR_OP_FEXT : IR_OP_FTRUNC, src_reg, to_type);
+  }
+
+  fprintf(stderr, "emit_cast_if_needed: float to integer conversion is not supported\n");
+  exit(EXIT_FAILURE);
 }
 
 // Expression handling
 
 static IrReg emit_expression(IrGenContext *ctx, AstExpr *node);
+
+static inline Type *expr_type(IrGenContext *ctx, AstExpr *node) {
+  return sema_expr_type(ctx->sema_ctx, node);
+}
 
 static IrOp get_unary_ir_op(UnaryOp op) {
   switch (op) {
@@ -169,10 +176,8 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
 
   switch (literal->kind) {
   case AST_LITERAL_INT:
-    break;
   case AST_LITERAL_FLOAT:
-    fprintf(stderr, "emit_literal: float literals not yet supported in IR generation\n");
-    exit(EXIT_FAILURE);
+    break;
   case AST_LITERAL_CHAR:
     fprintf(stderr, "emit_literal: char literals not yet supported in IR generation\n");
     exit(EXIT_FAILURE);
@@ -181,13 +186,19 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
     exit(EXIT_FAILURE);
   }
 
-  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
+  Type *type = expr_type(ctx, node);
+  IrReg res = next_reg(ctx, type);
 
-  IrInstr inst = {
-    .op = IR_OP_LOAD_LITERAL,
-    .res = res,
-    .literal = node->expr_literal.int_value,
-  };
+  IrInstr inst = {.res = res};
+
+  if (ir_type_is_float(get_ir_type(type))) {
+    inst.op = IR_OP_LOAD_FLOAT;
+    inst.float_literal = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
+  } else {
+    inst.op = IR_OP_LOAD_LITERAL;
+    inst.literal = literal->int_value;
+  }
+
   emit_ir_instr(ctx, inst);
 
   return res;
@@ -196,7 +207,7 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
 static IrReg emit_identifier(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_identifier: node is NULL");
 
-  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
+  IrReg res = next_reg(ctx, expr_type(ctx, node));
 
   IrInstr inst = {
     .op = IR_OP_LOAD_VAR,
@@ -236,14 +247,14 @@ static IrReg emit_call(IrGenContext *ctx, AstExpr *node) {
       AstExpr *arg_expr = node->expr_call.arguments[i];
 
       IrReg arg_reg = emit_expression(ctx, arg_expr);
-      Type *arg_type = ctx->sema_ctx->expr_types[arg_expr->id];
+      Type *arg_type = expr_type(ctx, arg_expr);
 
       arg_params[i].reg = arg_reg;
       arg_params[i].type = get_ir_type(arg_type);
     }
   }
 
-  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
+  IrReg res = next_reg(ctx, expr_type(ctx, node));
 
   IrInstr inst = {
     .op = IR_OP_CALL,
@@ -265,7 +276,7 @@ static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *node) {
 
   IrReg operand = emit_expression(ctx, node->expr_unary.operand);
 
-  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
+  IrReg res = next_reg(ctx, expr_type(ctx, node));
 
   IrInstr inst = {
     .op = get_unary_ir_op(node->expr_unary.op),
@@ -283,7 +294,7 @@ static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *node) {
   IrReg left = emit_expression(ctx, node->expr_binary.left);
   IrReg right = emit_expression(ctx, node->expr_binary.right);
 
-  IrReg res = next_reg(ctx, ctx->sema_ctx->expr_types[node->id]);
+  IrReg res = next_reg(ctx, expr_type(ctx, node));
 
   IrInstr inst = {
     .op = get_binary_ir_op(node->expr_binary.op),
@@ -294,6 +305,15 @@ static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *node) {
   emit_ir_instr(ctx, inst);
 
   return res;
+}
+
+static IrReg emit_cast(IrGenContext *ctx, AstExpr *node) {
+  assert(node && "emit_cast: node is NULL");
+
+  AstExpr *operand = node->expr_cast.operand;
+  IrReg value = emit_expression(ctx, operand);
+
+  return emit_cast_if_needed(ctx, value, expr_type(ctx, operand), expr_type(ctx, node));
 }
 
 static IrReg emit_expression(IrGenContext *ctx, AstExpr *node) {
@@ -317,6 +337,9 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *node) {
     return emit_unary_op(ctx, node);
   case AST_EXPR_BINARY:
     return emit_binary_op(ctx, node);
+
+  case AST_EXPR_CAST:
+    return emit_cast(ctx, node);
 
   case AST_EXPR_INVALID:
     fprintf(stderr, "ir_emit_expression: encountered AST_EXPR_INVALID node\n");
@@ -352,13 +375,20 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
   IrReg init_reg = emit_expression(ctx, stmt->stmt_local_var.init);
 
   if (init_reg.id == NULL_REG.id) {
-    init_reg = next_reg(ctx, TYPE_i32);
-    IrInstr inst = {
-      .op = IR_OP_LOAD_LITERAL,
-      .res = init_reg,
-      .literal = 0,
-    };
-    emit_ir_instr(ctx, inst);
+    Type *var_type = stmt->stmt_local_var.symbol->type;
+    init_reg = next_reg(ctx, var_type);
+
+    IrInstr zero = {.res = init_reg};
+
+    if (ir_type_is_float(get_ir_type(var_type))) {
+      zero.op = IR_OP_LOAD_FLOAT;
+      zero.float_literal = 0.0;
+    } else {
+      zero.op = IR_OP_LOAD_LITERAL;
+      zero.literal = 0;
+    }
+
+    emit_ir_instr(ctx, zero);
   }
 
   IrInstr inst = {
@@ -372,16 +402,7 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
 static void emit_stmt_return(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_return: stmt is NULL");
 
-  IrReg value = NULL_REG;
-
-  if (stmt->stmt_return.value) {
-    value = emit_expression(ctx, stmt->stmt_return.value);
-
-    Type *actual_type = ctx->sema_ctx->expr_types[stmt->stmt_return.value->id];
-    Type *expected_type = ctx->current_func_sym->type->function.return_type;
-
-    value = emit_cast_if_needed(ctx, value, actual_type, expected_type);
-  }
+  IrReg value = emit_expression(ctx, stmt->stmt_return.value);
 
   IrInstr inst = {
     .op = IR_OP_RETURN,
@@ -391,6 +412,7 @@ static void emit_stmt_return(IrGenContext *ctx, AstStmt *stmt) {
 }
 
 static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
+  UNUSED(stmt);
   assert(ctx->current_loop && "Break statement not within a loop");
 
   IrInstr inst = {
@@ -401,6 +423,7 @@ static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
 }
 
 static void emit_stmt_continue(IrGenContext *ctx, AstStmt *stmt) {
+  UNUSED(stmt);
   assert(ctx->current_loop && "Continue statement not within a loop");
 
   IrInstr inst = {

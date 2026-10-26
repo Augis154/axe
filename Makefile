@@ -26,7 +26,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 compile: all
-	./axc expr.ax
+	./axc test.axe out.ssa
 	qbe out.ssa -o out.s
 	gcc out.s -o out
 
