@@ -13,6 +13,10 @@ bool type_is_void(Type *type) {
   return type == TYPE_void;
 }
 
+bool type_has_storage(Type *type) {
+  return type == TYPE_error || type->size > 0;
+}
+
 bool type_is_untyped(Type *type) {
   return type == TYPE_untyped_int || type == TYPE_untyped_float;
 }

@@ -49,6 +49,7 @@ TYPES_BUILTIN(TYPE_EXTERN)
 #undef TYPE_EXTERN
 
 bool type_is_void(Type *type);
+bool type_has_storage(Type *type);
 bool type_is_untyped(Type *type);
 bool type_is_integer(Type *type);
 bool type_is_float(Type *type);
