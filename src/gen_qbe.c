@@ -39,22 +39,32 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
     return;
 
   // Memory & Variables
-  case IR_OP_LOAD_LITERAL:
-    fprintf(file, "  %%r%u =%c copy %ld\n", instr.res.id, reg_type_char(current_func, instr.res), instr.literal);
+  case IR_OP_LOAD_INT:
+    fprintf(file, "  %%r%u =%c copy %ld\n", instr.res.id, reg_type_char(current_func, instr.res), instr.int_lit);
     return;
 
   case IR_OP_LOAD_FLOAT: {
     char type_char = reg_type_char(current_func, instr.res);
-    fprintf(file, "  %%r%u =%c copy %c_%.17g\n", instr.res.id, type_char, type_char, instr.float_literal);
+    fprintf(file, "  %%r%u =%c copy %c_%.17g\n", instr.res.id, type_char, type_char, instr.float_lit);
     return;
   }
 
   case IR_OP_LOAD_VAR:
-    fprintf(file, "  %%r%u =%c copy %%%s\n", instr.res.id, reg_type_char(current_func, instr.res), instr.var_name);
+    fprintf(file,
+            "  %%r%u =%c copy %%%s.%u\n",
+            instr.res.id,
+            reg_type_char(current_func, instr.res),
+            instr.var.name,
+            instr.var.id);
     return;
 
   case IR_OP_STORE_VAR:
-    fprintf(file, "  %%%s =%c copy %%r%u\n", instr.var_name, reg_type_char(current_func, instr.res), instr.res.id);
+    fprintf(file,
+            "  %%%s.%u =%c copy %%r%u\n",
+            instr.var.name,
+            instr.var.id,
+            reg_type_char(current_func, instr.arg1),
+            instr.arg1.id);
     return;
 
   // Unary Operations
@@ -156,8 +166,8 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
     for (size_t i = 0; i < instr.call.arg_count; i++) {
       if (i > 0) fprintf(file, ", ");
 
-      IrFuncArg *arg = &instr.call.args[i];
-      fprintf(file, "%c %%r%u", qbe_type_char(arg->type), arg->reg.id);
+      IrReg arg = instr.call.args[i];
+      fprintf(file, "%c %%r%u", reg_type_char(current_func, arg), arg.id);
     }
 
     fprintf(file, ")\n");
@@ -220,11 +230,11 @@ static void qbe_write_function(FILE *file, const IrFunction *function) {
   fprintf(file, "$%s(", function->name);
 
   for (size_t i = 0; i < function->param_count; i++) {
-    const IrFuncParam *param = &function->params[i];
-    char param_type_char = qbe_type_char(param->type);
+    const IrVar *param = &function->params[i];
+    char param_type_char = qbe_type_char(function->param_types[i]);
 
     if (i > 0) fprintf(file, ", ");
-    fprintf(file, "%c %%%s", param_type_char, param->name);
+    fprintf(file, "%c %%%s.%u", param_type_char, param->name, param->id);
   }
 
   fprintf(file, ") {\n@start\n");

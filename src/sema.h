@@ -15,7 +15,7 @@ typedef enum {
   SYMBOL_FUNCTION,
 } SymbolKind;
 
-typedef struct Symbol_ {
+struct Symbol_ {
   SymbolKind kind;
   uint32_t id;
 
@@ -25,7 +25,7 @@ typedef struct Symbol_ {
   Type *type;
 
   struct Symbol_ *next;
-} Symbol;
+};
 
 typedef struct Scope_ {
   struct Scope_ *parent;
