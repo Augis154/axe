@@ -8,7 +8,7 @@
 typedef enum {
   IR_OP_NONE = 0,
 
-  IR_OP_LOAD_LITERAL,
+  IR_OP_LOAD_INT,
   IR_OP_LOAD_FLOAT,
 
   IR_OP_LOAD_VAR,
@@ -67,52 +67,42 @@ typedef struct {
 #define NULL_LABEL ((IrLabel){0})
 
 typedef struct {
-  IrReg reg;
-  IrType type;
-} IrFuncArg;
+  const char *name;
+  uint32_t id;
+} IrVar;
+
+typedef struct {
+  const char *callee;
+  IrReg *args;
+  size_t arg_count;
+} IrCall;
 
 typedef struct {
   IrOp op;
 
+  IrReg res;
+  IrReg arg1;
+  IrReg arg2;
+
   union {
-    IrReg res;
+    int64_t int_lit;
+    double float_lit;
+    IrVar var;
+    IrCall call;
     IrLabel target;
     struct {
       IrLabel target_true;
       IrLabel target_false;
     };
   };
-
-  union {
-    struct {
-      IrReg arg1;
-      IrReg arg2;
-    };
-
-    int64_t literal;
-    double float_literal;
-
-    const char *var_name;
-
-    struct {
-      const char *callee;
-      IrFuncArg *args;
-      size_t arg_count;
-    } call;
-  };
 } IrInstr;
-
-typedef struct {
-  const char *name;
-  IrType type;
-  IrReg reg;
-} IrFuncParam;
 
 typedef struct {
   const char *name;
   IrType return_type;
 
-  IrFuncParam *params;
+  IrVar *params;
+  IrType *param_types;
   uint32_t param_count;
 
   IrInstr *buffer;

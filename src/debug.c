@@ -228,19 +228,19 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: <none>\n", i);
       continue;
 
-    case IR_OP_LOAD_LITERAL:
-      printf("%zu: r%u = %ld\n", i, inst->res.id, inst->literal);
+    case IR_OP_LOAD_INT:
+      printf("%zu: r%u = %ld\n", i, inst->res.id, inst->int_lit);
       continue;
 
     case IR_OP_LOAD_FLOAT:
-      printf("%zu: r%u = %g\n", i, inst->res.id, inst->float_literal);
+      printf("%zu: r%u = %g\n", i, inst->res.id, inst->float_lit);
       continue;
 
     case IR_OP_LOAD_VAR:
-      printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var_name);
+      printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var.name);
       continue;
     case IR_OP_STORE_VAR:
-      printf("%zu: STORE_VAR %s = r%u\n", i, inst->var_name, inst->res.id);
+      printf("%zu: STORE_VAR %s = r%u\n", i, inst->var.name, inst->arg1.id);
       continue;
 
       // Unary operations
@@ -291,16 +291,16 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: JUMP @l%u\n", i, inst->target.id);
       continue;
     case IR_OP_JZ:
-      printf("%zu: JZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
+      printf("%zu: JZ r%u, @l%u, @l%u\n", i, inst->arg1.id, inst->target_true.id, inst->target_false.id);
       continue;
     case IR_OP_JNZ:
-      printf("%zu: JNZ r%u, @l%u\n", i, inst->arg1.id, inst->target.id);
+      printf("%zu: JNZ r%u, @l%u, @l%u\n", i, inst->arg1.id, inst->target_true.id, inst->target_false.id);
       continue;
 
     case IR_OP_CALL:
-      printf("%zu: CALL r%u, %s(", i, inst->res.id, inst->var_name);
+      printf("%zu: CALL r%u, %s(", i, inst->res.id, inst->call.callee);
       for (size_t j = 0; j < inst->call.arg_count; j++) {
-        printf("r%u", inst->call.args[j].reg.id);
+        printf("r%u", inst->call.args[j].id);
         if (j < inst->call.arg_count - 1) {
           printf(", ");
         }

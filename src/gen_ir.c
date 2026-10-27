@@ -183,10 +183,10 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
 
   if (ir_type_is_float(get_ir_type(type))) {
     inst.op = IR_OP_LOAD_FLOAT;
-    inst.float_literal = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
+    inst.float_lit = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
   } else {
-    inst.op = IR_OP_LOAD_LITERAL;
-    inst.literal = literal->int_value;
+    inst.op = IR_OP_LOAD_INT;
+    inst.int_lit = literal->int_value;
   }
 
   emit_ir_instr(ctx, inst);
@@ -202,7 +202,7 @@ static IrReg emit_identifier(IrGenContext *ctx, AstExpr *node) {
   IrInstr inst = {
     .op = IR_OP_LOAD_VAR,
     .res = res,
-    .var_name = node->expr_identifier.name,
+    .var = {.name = node->expr_identifier.name, .id = node->expr_identifier.symbol->id},
   };
   emit_ir_instr(ctx, inst);
 
@@ -216,8 +216,9 @@ static IrReg emit_assignment(IrGenContext *ctx, AstExpr *node) {
 
   IrInstr inst = {
     .op = IR_OP_STORE_VAR,
-    .res = value,
-    .var_name = node->expr_assign.target->expr_identifier.name,
+    .arg1 = value,
+    .var = {.name = node->expr_assign.target->expr_identifier.name,
+            .id = node->expr_assign.target->expr_identifier.symbol->id},
   };
   emit_ir_instr(ctx, inst);
 
@@ -227,20 +228,16 @@ static IrReg emit_assignment(IrGenContext *ctx, AstExpr *node) {
 static IrReg emit_call(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_call: node is NULL");
 
-  IrFuncArg *arg_params = NULL;
+  IrReg *arg_params = NULL;
   size_t arg_count = node->expr_call.argument_count;
 
   if (arg_count > 0) {
-    arg_params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrFuncArg) * arg_count);
+    arg_params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * arg_count);
 
     for (size_t i = 0; i < arg_count; i++) {
       AstExpr *arg_expr = node->expr_call.arguments[i];
 
-      IrReg arg_reg = emit_expression(ctx, arg_expr);
-      Type *arg_type = expr_type(ctx, arg_expr);
-
-      arg_params[i].reg = arg_reg;
-      arg_params[i].type = get_ir_type(arg_type);
+      arg_params[i] = emit_expression(ctx, arg_expr);
     }
   }
 
@@ -370,10 +367,10 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
 
     if (ir_type_is_float(get_ir_type(var_type))) {
       zero.op = IR_OP_LOAD_FLOAT;
-      zero.float_literal = 0.0;
+      zero.float_lit = 0.0;
     } else {
-      zero.op = IR_OP_LOAD_LITERAL;
-      zero.literal = 0;
+      zero.op = IR_OP_LOAD_INT;
+      zero.int_lit = 0;
     }
 
     emit_ir_instr(ctx, zero);
@@ -381,8 +378,8 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
 
   IrInstr inst = {
     .op = IR_OP_STORE_VAR,
-    .res = init_reg,
-    .var_name = stmt->stmt_local_var.name,
+    .arg1 = init_reg,
+    .var = {.name = stmt->stmt_local_var.name, .id = stmt->stmt_local_var.symbol->id},
   };
   emit_ir_instr(ctx, inst);
 }
@@ -581,6 +578,7 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
     .name = func_decl->name,
     .return_type = get_ir_type(return_type),
     .params = NULL,
+    .param_types = NULL,
     .param_count = func_decl->param_count,
     .buffer = NULL,
     .reg_types = NULL,
@@ -593,22 +591,18 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
   ctx->current_func_sym = func_decl->symbol;
 
   uint32_t param_count = func_decl->param_count;
-  IrFuncParam *params = NULL;
 
   if (param_count > 0) {
-    params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrFuncParam) * param_count);
+    IrFunction *func = get_current_func(ctx);
+    func->params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrVar) * param_count);
+    func->param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(IrType) * param_count);
 
     for (size_t i = 0; i < param_count; i++) {
       AstParam *param = &func_decl->params[i];
 
-      IrReg param_reg = next_reg(ctx, param->symbol->type);
-
-      params[i].name = param->symbol->name;
-      params[i].type = get_ir_type(param->symbol->type);
-      params[i].reg = param_reg;
+      func->params[i] = (IrVar){.name = param->symbol->name, .id = param->symbol->id};
+      func->param_types[i] = get_ir_type(param->symbol->type);
     }
-
-    get_current_func(ctx)->params = params;
   }
 
   emit_statement(ctx, func_decl->body);

@@ -38,6 +38,19 @@ static Scope *scope_exit(Scope *current) {
   return current->parent;
 }
 
+// Allocates a symbol; `name` must be interned. It is not added to any scope.
+static Symbol *symbol_new(SemaContext *ctx, const char *name, SymbolKind kind, Type *type, SourceLoc loc) {
+  Symbol *sym = arena_alloc(&ctx->comp_unit->arena, sizeof(Symbol));
+  *sym = (Symbol){
+    .kind = kind,
+    .id = ctx->next_symbol_id++,
+    .loc = loc,
+    .name = name,
+    .type = type,
+  };
+  return sym;
+}
+
 // Declares `name` in the current scope; returns NULL if it is already declared there.
 static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind, Type *type, SourceLoc loc) {
   const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
@@ -48,15 +61,10 @@ static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind,
     }
   }
 
-  Symbol *sym = arena_alloc(&ctx->comp_unit->arena, sizeof(Symbol));
-  sym->name = interned_name;
-  sym->id = ctx->next_symbol_id++;
+  Symbol *sym = symbol_new(ctx, interned_name, kind, type, loc);
   sym->next = ctx->current_scope->symbols;
-  sym->kind = kind;
-  sym->loc = loc;
-  sym->type = type;
-
   ctx->current_scope->symbols = sym;
+
   return sym;
 }
 
@@ -739,14 +747,8 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
   if (!sym) {
     sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", func->name);
 
-    sym = arena_alloc(&ctx->comp_unit->arena, sizeof(Symbol));
-    *sym = (Symbol){
-      .kind = SYMBOL_FUNCTION,
-      .id = ctx->next_symbol_id++,
-      .loc = decl->loc,
-      .name = func->name,
-      .type = func_type,
-    };
+    const char *sym_name = st_intern(&ctx->comp_unit->intern_table, func->name);
+    sym = symbol_new(ctx, sym_name, SYMBOL_FUNCTION, func_type, decl->loc);
   }
 
   sym->type = func_type;
