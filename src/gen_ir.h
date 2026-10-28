@@ -25,6 +25,9 @@ typedef struct {
   uint32_t next_reg;
   uint32_t next_label;
 
+  IrReg *symbol_to_reg;
+  IrInstr *entry_allocs;
+
   LoopLabels *current_loop;
   bool block_terminated;
 } IrGenContext;

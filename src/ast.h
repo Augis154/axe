@@ -39,18 +39,20 @@ typedef enum {
   AST_EXPR_LITERAL,
   AST_EXPR_IDENTIFIER,
 
+  AST_EXPR_UNARY,
+  AST_EXPR_ADDR_OF,
+  AST_EXPR_DEREF,
+  AST_EXPR_BINARY,
+  AST_EXPR_CAST,
+
   AST_EXPR_ASSIGN,
   AST_EXPR_CALL,
-
-  AST_EXPR_UNARY,
-  AST_EXPR_BINARY,
-
-  AST_EXPR_CAST,
 } AstExprKind;
 
 typedef enum {
   AST_LITERAL_INT,
   AST_LITERAL_FLOAT,
+  AST_LITERAL_NULL,
   AST_LITERAL_CHAR,
   AST_LITERAL_STRING,
 } AstLiteralKind;
@@ -71,20 +73,17 @@ typedef struct {
 } AstExprIdentifier;
 
 typedef struct {
-  AstExpr *target;
-  AstExpr *value;
-} AstExprAssign;
-
-typedef struct {
-  AstExpr *callee;
-  AstExpr **arguments;
-  size_t argument_count;
-} AstExprCall;
-
-typedef struct {
   UnaryOp op;
   AstExpr *operand;
 } AstExprUnary;
+
+typedef struct {
+  AstExpr *operand;
+} AstExprAddrOf;
+
+typedef struct {
+  AstExpr *operand;
+} AstExprDeref;
 
 typedef struct {
   BinaryOp op;
@@ -98,6 +97,17 @@ typedef struct {
   bool implicit;
 } AstExprCast;
 
+typedef struct {
+  AstExpr *target;
+  AstExpr *value;
+} AstExprAssign;
+
+typedef struct {
+  AstExpr *callee;
+  AstExpr **arguments;
+  size_t argument_count;
+} AstExprCall;
+
 struct AstExpr_ {
   AstExprKind kind;
   uint32_t id;
@@ -107,13 +117,14 @@ struct AstExpr_ {
     AstExprLiteral expr_literal;
     AstExprIdentifier expr_identifier;
 
+    AstExprUnary expr_unary;
+    AstExprAddrOf expr_addr_of;
+    AstExprDeref expr_deref;
+    AstExprBinary expr_binary;
+    AstExprCast expr_cast;
+
     AstExprAssign expr_assign;
     AstExprCall expr_call;
-
-    AstExprUnary expr_unary;
-    AstExprBinary expr_binary;
-
-    AstExprCast expr_cast;
   };
 };
 

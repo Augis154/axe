@@ -1,11 +1,14 @@
 #include "gen_ir.h"
 
+#include "ast.h"
 #include "common.h"
+#include "ir.h"
 #include "lib/array.h"
 #include "sema.h"
 #include "types.h"
 
 #include <assert.h>
+#include <string.h>
 
 static IrType get_ir_type(Type *type) {
   assert(type && "expression has no type; sema did not analyse it");
@@ -28,6 +31,11 @@ static IrType get_ir_type(Type *type) {
     return IR_TYPE_I32;
   case TYPE_KIND_UNTYPED_FLOAT:
     return IR_TYPE_F64;
+  case TYPE_KIND_UNTYPED_NULL:
+    return IR_TYPE_PTR;
+
+  case TYPE_KIND_POINTER:
+    return IR_TYPE_PTR;
 
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
@@ -42,16 +50,38 @@ static inline IrFunction *get_current_func(IrGenContext *ctx) {
   return &ctx->module->functions[ctx->current_func_idx];
 }
 
-static IrReg next_reg(IrGenContext *ctx, Type *type) {
+static IrReg next_ir_reg(IrGenContext *ctx, IrType type) {
   IrFunction *current_func = get_current_func(ctx);
   IrReg reg = (IrReg){.id = (ctx)->next_reg++};
-  da_append(current_func->reg_types, get_ir_type(type));
+  da_append(current_func->reg_types, type);
   return reg;
+}
+
+static IrReg next_reg(IrGenContext *ctx, Type *type) {
+  return next_ir_reg(ctx, get_ir_type(type));
 }
 
 static IrLabel next_label(IrGenContext *ctx) {
   IrLabel label = (IrLabel){.id = (ctx)->next_label++};
   return label;
+}
+
+static void bind_symbol_reg(IrGenContext *ctx, Symbol *sym, IrReg reg) {
+  assert(sym != NULL && "cannot map NULL symbol");
+  assert(sym->id < da_len(ctx->symbol_to_reg) && "symbol id outside the register table");
+  assert(ctx->symbol_to_reg[sym->id].id == NULL_REG.id && "symbol is already mapped");
+
+  ctx->symbol_to_reg[sym->id] = reg;
+}
+
+static IrReg get_symbol_reg(IrGenContext *ctx, Symbol *sym) {
+  assert(sym != NULL && "cannot get NULL symbol");
+  assert(sym->id < da_len(ctx->symbol_to_reg) && "symbol id outside the register table");
+
+  IrReg reg = ctx->symbol_to_reg[sym->id];
+  assert(reg.id != NULL_REG.id && "symbol was never mapped to a register");
+
+  return reg;
 }
 
 static void emit_ir_instr(IrGenContext *ctx, IrInstr instr) {
@@ -71,12 +101,43 @@ static void emit_ir_instr(IrGenContext *ctx, IrInstr instr) {
   }
 }
 
+static IrReg emit_int_const(IrGenContext *ctx, int64_t value, IrType type) {
+  IrReg reg = next_ir_reg(ctx, type);
+
+  IrInstr inst = {
+    .op = IR_OP_LOAD_INT,
+    .res = reg,
+    .int_lit = value,
+  };
+  emit_ir_instr(ctx, inst);
+
+  return reg;
+}
+
+static IrReg queue_entry_alloc(IrGenContext *ctx, uint32_t size) {
+  IrReg slot = next_ir_reg(ctx, IR_TYPE_PTR);
+
+  IrInstr alloc = {
+    .op = IR_OP_ALLOC,
+    .res = slot,
+    .int_lit = size,
+  };
+  da_append(ctx->entry_allocs, alloc);
+
+  return slot;
+}
+
 static inline bool ir_type_is_float(IrType type) {
   return type == IR_TYPE_F32 || type == IR_TYPE_F64;
 }
 
 // IR op that converts a value of IR type `from` to IR type `to`.
 static IrOp conversion_op(IrType from, IrType to) {
+  // Pointers and i64 have the same representation; only the register's type changes.
+  bool from_wide = from == IR_TYPE_I64 || from == IR_TYPE_PTR;
+  bool to_wide = to == IR_TYPE_I64 || to == IR_TYPE_PTR;
+  if (from_wide && to_wide) return IR_OP_COPY;
+
   bool from_float = ir_type_is_float(from);
   bool to_float = ir_type_is_float(to);
 
@@ -169,6 +230,7 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
   switch (literal->kind) {
   case AST_LITERAL_INT:
   case AST_LITERAL_FLOAT:
+  case AST_LITERAL_NULL:
     break;
   case AST_LITERAL_CHAR:
     UNREACHABLE("sema rejects char literals");
@@ -186,7 +248,7 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
     inst.float_lit = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
   } else {
     inst.op = IR_OP_LOAD_INT;
-    inst.int_lit = literal->int_value;
+    inst.int_lit = literal->kind == AST_LITERAL_NULL ? 0 : literal->int_value;
   }
 
   emit_ir_instr(ctx, inst);
@@ -197,29 +259,51 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
 static IrReg emit_identifier(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_identifier: node is NULL");
 
-  IrReg res = next_reg(ctx, expr_type(ctx, node));
+  Symbol *sym = node->expr_identifier.symbol;
+  IrReg reg = get_symbol_reg(ctx, sym);
 
-  IrInstr inst = {
-    .op = IR_OP_LOAD_VAR,
-    .res = res,
-    .var = {.name = node->expr_identifier.name, .id = node->expr_identifier.symbol->id},
-  };
-  emit_ir_instr(ctx, inst);
+  if (sym->local.is_address_taken) {
+    IrReg val_reg = next_reg(ctx, sym->type);
 
-  return res;
+    IrInstr inst = {
+      .op = IR_OP_LOAD,
+      .res = val_reg,
+      .arg1 = reg,
+    };
+    emit_ir_instr(ctx, inst);
+
+    return val_reg;
+  }
+
+  return reg;
 }
 
 static IrReg emit_assignment(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_assignment: node is NULL");
 
+  AstExpr *target = node->expr_assign.target;
+
+  if (target->kind == AST_EXPR_DEREF) {
+    IrReg ptr_reg = emit_expression(ctx, target->expr_deref.operand);
+    IrReg val_reg = emit_expression(ctx, node->expr_assign.value);
+
+    IrInstr inst = {
+      .op = IR_OP_STORE,
+      .arg1 = val_reg,
+      .arg2 = ptr_reg,
+    };
+    emit_ir_instr(ctx, inst);
+
+    return val_reg;
+  }
+
+  Symbol *target_sym = target->expr_identifier.symbol;
+  IrReg target_reg = get_symbol_reg(ctx, target_sym);
+
   IrReg value = emit_expression(ctx, node->expr_assign.value);
 
-  IrInstr inst = {
-    .op = IR_OP_STORE_VAR,
-    .arg1 = value,
-    .var = {.name = node->expr_assign.target->expr_identifier.name,
-            .id = node->expr_assign.target->expr_identifier.symbol->id},
-  };
+  IrInstr inst = target_sym->local.is_address_taken ? (IrInstr){.op = IR_OP_STORE, .arg1 = value, .arg2 = target_reg}
+                                                    : (IrInstr){.op = IR_OP_COPY, .res = target_reg, .arg1 = value};
   emit_ir_instr(ctx, inst);
 
   return value;
@@ -262,7 +346,6 @@ static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_unary_op: node is NULL");
 
   IrReg operand = emit_expression(ctx, node->expr_unary.operand);
-
   IrReg res = next_reg(ctx, expr_type(ctx, node));
 
   IrInstr inst = {
@@ -275,12 +358,103 @@ static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *node) {
   return res;
 }
 
+static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *node) {
+  assert(node && "emit_addr_of: node is NULL");
+
+  AstExpr *operand = node->expr_addr_of.operand;
+
+  if (operand->kind == AST_EXPR_DEREF) {
+    return emit_expression(ctx, operand->expr_deref.operand);
+  }
+
+  Symbol *sym = operand->expr_identifier.symbol;
+  assert(sym->local.is_address_taken && "sema marks every variable whose address is taken");
+
+  return get_symbol_reg(ctx, sym);
+}
+
+static IrReg emit_deref(IrGenContext *ctx, AstExpr *node) {
+  assert(node && "emit_deref: node is NULL");
+
+  IrReg ptr_reg = emit_expression(ctx, node->expr_deref.operand);
+  IrReg val_reg = next_reg(ctx, expr_type(ctx, node));
+
+  IrInstr inst = {
+    .op = IR_OP_LOAD,
+    .res = val_reg,
+    .arg1 = ptr_reg,
+  };
+  emit_ir_instr(ctx, inst);
+
+  return val_reg;
+}
+
+// `ptr +- int` moves by whole elements and `ptr - ptr` counts them, so offsets are scaled by the pointee size.
+static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *node) {
+  AstExpr *left_node = node->expr_binary.left;
+  AstExpr *right_node = node->expr_binary.right;
+  Type *left_type = expr_type(ctx, left_node);
+  Type *right_type = expr_type(ctx, right_node);
+
+  IrReg left = emit_expression(ctx, left_node);
+  IrReg right = emit_expression(ctx, right_node);
+
+  bool left_is_ptr = type_is_pointer(left_type);
+  Type *ptr_type = left_is_ptr ? left_type : right_type;
+  int64_t element_size = ptr_type->pointer.base->size;
+
+  if (type_is_pointer(left_type) && type_is_pointer(right_type)) {
+    IrReg bytes = next_ir_reg(ctx, IR_TYPE_I64);
+
+    IrInstr sub = {.op = IR_OP_SUB, .res = bytes, .arg1 = left, .arg2 = right};
+    emit_ir_instr(ctx, sub);
+
+    if (element_size == 1) {
+      return bytes;
+    }
+
+    IrReg size_reg = emit_int_const(ctx, element_size, IR_TYPE_I64);
+    IrReg count = next_ir_reg(ctx, IR_TYPE_I64);
+
+    IrInstr div = {.op = IR_OP_DIV, .res = count, .arg1 = bytes, .arg2 = size_reg};
+    emit_ir_instr(ctx, div);
+
+    return count;
+  }
+
+  IrReg ptr = left_is_ptr ? left : right;
+  IrReg offset = left_is_ptr ? right : left;
+
+  if (element_size != 1) {
+    IrReg size_reg = emit_int_const(ctx, element_size, IR_TYPE_I64);
+    IrReg bytes = next_ir_reg(ctx, IR_TYPE_I64);
+
+    IrInstr mul = {.op = IR_OP_MUL, .res = bytes, .arg1 = offset, .arg2 = size_reg};
+    emit_ir_instr(ctx, mul);
+
+    offset = bytes;
+  }
+
+  IrReg res = next_ir_reg(ctx, IR_TYPE_PTR);
+
+  IrInstr inst = {.op = get_binary_ir_op(node->expr_binary.op), .res = res, .arg1 = ptr, .arg2 = offset};
+  emit_ir_instr(ctx, inst);
+
+  return res;
+}
+
 static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *node) {
   assert(node && "emit_binary_op: node is NULL");
 
+  BinaryOp op = node->expr_binary.op;
+  bool is_arithmetic = op == BINOP_ADD || op == BINOP_SUB;
+  if (is_arithmetic && (type_is_pointer(expr_type(ctx, node->expr_binary.left)) ||
+                        type_is_pointer(expr_type(ctx, node->expr_binary.right)))) {
+    return emit_pointer_arithmetic(ctx, node);
+  }
+
   IrReg left = emit_expression(ctx, node->expr_binary.left);
   IrReg right = emit_expression(ctx, node->expr_binary.right);
-
   IrReg res = next_reg(ctx, expr_type(ctx, node));
 
   IrInstr inst = {
@@ -315,18 +489,26 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *node) {
   case AST_EXPR_IDENTIFIER:
     return emit_identifier(ctx, node);
 
-  case AST_EXPR_ASSIGN:
-    return emit_assignment(ctx, node);
-  case AST_EXPR_CALL:
-    return emit_call(ctx, node);
-
   case AST_EXPR_UNARY:
     return emit_unary_op(ctx, node);
+
+  case AST_EXPR_ADDR_OF:
+    return emit_addr_of(ctx, node);
+
+  case AST_EXPR_DEREF:
+    return emit_deref(ctx, node);
+
   case AST_EXPR_BINARY:
     return emit_binary_op(ctx, node);
 
   case AST_EXPR_CAST:
     return emit_cast(ctx, node);
+
+  case AST_EXPR_ASSIGN:
+    return emit_assignment(ctx, node);
+
+  case AST_EXPR_CALL:
+    return emit_call(ctx, node);
 
   case AST_EXPR_INVALID:
     UNREACHABLE("AST_EXPR_INVALID reached IR generation");
@@ -357,15 +539,20 @@ static void emit_stmt_expression(IrGenContext *ctx, AstStmt *stmt) {
 static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_local_var: stmt is NULL");
 
+  Symbol *sym = stmt->stmt_local_var.symbol;
+  bool in_memory = sym->local.is_address_taken;
+
+  IrReg reg = in_memory ? queue_entry_alloc(ctx, sym->type->size) : next_reg(ctx, sym->type);
+
+  bind_symbol_reg(ctx, sym, reg);
+
   IrReg init_reg = emit_expression(ctx, stmt->stmt_local_var.init);
 
   if (init_reg.id == NULL_REG.id) {
-    Type *var_type = stmt->stmt_local_var.symbol->type;
-    init_reg = next_reg(ctx, var_type);
-
+    init_reg = next_reg(ctx, sym->type);
     IrInstr zero = {.res = init_reg};
 
-    if (ir_type_is_float(get_ir_type(var_type))) {
+    if (ir_type_is_float(get_ir_type(sym->type))) {
       zero.op = IR_OP_LOAD_FLOAT;
       zero.float_lit = 0.0;
     } else {
@@ -376,10 +563,21 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
     emit_ir_instr(ctx, zero);
   }
 
+  if (in_memory) {
+    IrInstr inst = {
+      .op = IR_OP_STORE,
+      .arg1 = init_reg,
+      .arg2 = reg,
+    };
+    emit_ir_instr(ctx, inst);
+
+    return;
+  }
+
   IrInstr inst = {
-    .op = IR_OP_STORE_VAR,
+    .op = IR_OP_COPY,
+    .res = reg,
     .arg1 = init_reg,
-    .var = {.name = stmt->stmt_local_var.name, .id = stmt->stmt_local_var.symbol->id},
   };
   emit_ir_instr(ctx, inst);
 }
@@ -578,7 +776,6 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
     .name = func_decl->name,
     .return_type = get_ir_type(return_type),
     .params = NULL,
-    .param_types = NULL,
     .param_count = func_decl->param_count,
     .buffer = NULL,
     .reg_types = NULL,
@@ -594,14 +791,23 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
 
   if (param_count > 0) {
     IrFunction *func = get_current_func(ctx);
-    func->params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrVar) * param_count);
-    func->param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(IrType) * param_count);
+    func->params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * param_count);
 
     for (size_t i = 0; i < param_count; i++) {
-      AstParam *param = &func_decl->params[i];
+      Symbol *sym = func_decl->params[i].symbol;
 
-      func->params[i] = (IrVar){.name = param->symbol->name, .id = param->symbol->id};
-      func->param_types[i] = get_ir_type(param->symbol->type);
+      func->params[i] = next_reg(ctx, sym->type);
+
+      if (sym->local.is_address_taken) {
+        IrReg slot = queue_entry_alloc(ctx, sym->type->size);
+
+        IrInstr spill = {.op = IR_OP_STORE, .arg1 = func->params[i], .arg2 = slot};
+        emit_ir_instr(ctx, spill);
+
+        bind_symbol_reg(ctx, sym, slot);
+      } else {
+        bind_symbol_reg(ctx, sym, func->params[i]);
+      }
     }
   }
 
@@ -614,6 +820,12 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
     };
     emit_ir_instr(ctx, ret_inst);
   }
+
+  IrFunction *func = get_current_func(ctx);
+  for (size_t i = da_len(ctx->entry_allocs); i > 0; i--) {
+    da_insert(func->buffer, 0, ctx->entry_allocs[i - 1]);
+  }
+  da_set_len(ctx->entry_allocs, 0);
 }
 
 static void emit_decl(IrGenContext *ctx, AstDecl *decl) {
@@ -642,6 +854,13 @@ void gen_ir_init(IrGenContext *ctx, CompilationUnit *comp_unit, SemaContext *sem
 
   ctx->current_loop = NULL;
   ctx->block_terminated = false;
+
+  ctx->entry_allocs = NULL;
+  ctx->symbol_to_reg = NULL;
+  da_set_len(ctx->symbol_to_reg, ctx->sema_ctx->next_symbol_id);
+  for (size_t i = 0; i < da_len(ctx->symbol_to_reg); i++) {
+    ctx->symbol_to_reg[i] = NULL_REG;
+  }
 }
 
 void gen_ir_free(IrGenContext *ctx) {
@@ -650,7 +869,10 @@ void gen_ir_free(IrGenContext *ctx) {
     da_free(func->buffer);
     da_free(func->reg_types);
   }
+
   da_free(ctx->module->functions);
+  da_free(ctx->symbol_to_reg);
+  da_free(ctx->entry_allocs);
 }
 
 void gen_ir(IrGenContext *ctx, AstProgram *program) {

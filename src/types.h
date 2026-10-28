@@ -1,6 +1,9 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include "common.h"
+#include "lib/arena.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,6 +13,7 @@
   X(TYPE_KIND_VOID, 0, void)                   \
   X(TYPE_KIND_UNTYPED_INT, 8, untyped_int)     \
   X(TYPE_KIND_UNTYPED_FLOAT, 8, untyped_float) \
+  X(TYPE_KIND_UNTYPED_NULL, 8, untyped_null)   \
                                                \
   X(TYPE_KIND_I32, 4, i32)                     \
   X(TYPE_KIND_I64, 8, i64)                     \
@@ -20,6 +24,7 @@
 
 typedef enum {
   TYPE_KIND_FUNCTION,
+  TYPE_KIND_POINTER,
 
 #define TYPE_ENUM(kind, size, ident) kind,
   TYPES_BUILTIN(TYPE_ENUM)
@@ -27,30 +32,39 @@ typedef enum {
 } TypeKind;
 
 typedef struct {
-  struct Type_ *return_type;
-  struct Type_ **param_types;
+  Type *base;
+} TypePointer;
+
+typedef struct {
+  Type *return_type;
+  Type **param_types;
 
   size_t param_count;
   bool is_variadic;
 } TypeFunction;
 
-typedef struct Type_ {
+struct Type_ {
   TypeKind kind;
   uint32_t size;
   const char *name;
 
   union {
+    TypePointer pointer;
     TypeFunction function;
   };
-} Type;
+};
 
-#define TYPE_EXTERN(kind, size, ident) extern Type *TYPE_##ident;
+#define TYPE_EXTERN(kind, size, ident) extern Type *const type_##ident;
 TYPES_BUILTIN(TYPE_EXTERN)
 #undef TYPE_EXTERN
 
+extern Type *const type_void_ptr;
+
 bool type_is_void(Type *type);
+bool type_is_pointer(Type *type);
 bool type_has_storage(Type *type);
 bool type_is_untyped(Type *type);
+bool type_is_internal(Type *type);
 bool type_is_integer(Type *type);
 bool type_is_float(Type *type);
 bool type_is_bool(Type *type);
@@ -60,6 +74,8 @@ bool type_is_orderable(Type *type);
 bool type_is_comparable(Type *type);
 
 bool type_equals(Type *a, Type *b);
+
+Type *type_pointer_to(Arena *arena, Type *base);
 
 Type *type_default(Type *type);
 

@@ -17,11 +17,13 @@
   X(TOKEN_ASSIGN, "=")      \
   X(TOKEN_BANG, "!")        \
                             \
-  X(TOKEN_LESS, "<")        \
-  X(TOKEN_GREATER, ">")     \
+  X(TOKEN_AMP, "&")         \
+  X(TOKEN_DEREF, ".*")      \
                             \
   X(TOKEN_EQ, "==")         \
   X(TOKEN_NOT_EQ, "!=")     \
+  X(TOKEN_LESS, "<")        \
+  X(TOKEN_GREATER, ">")     \
   X(TOKEN_LESS_EQ, "<=")    \
   X(TOKEN_GREATER_EQ, ">=")
 
@@ -31,6 +33,7 @@
   X(TOKEN_LBRACE, "{")    \
   X(TOKEN_RBRACE, "}")    \
                           \
+  X(TOKEN_DOT, ".")       \
   X(TOKEN_COMMA, ",")     \
   X(TOKEN_COLON, ":")     \
   X(TOKEN_SEMICOLON, ";")
@@ -54,7 +57,9 @@
   X(TOKEN_ELSE, "else")         \
   X(TOKEN_WHILE, "while")       \
                                 \
-  X(TOKEN_AS, "as")
+  X(TOKEN_AS, "as")             \
+                                \
+  X(TOKEN_NULL, "null")
 
 #define TOKEN_LIST(X) \
   TOKENS_SPECIAL(X)   \
