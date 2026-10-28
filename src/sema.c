@@ -1,6 +1,7 @@
 #include "sema.h"
 
 #include "ast.h"
+#include "common.h"
 #include "lib/arena.h"
 #include "lib/array.h"
 #include "lib/str_table.h"
@@ -8,7 +9,9 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 static void sema_error(SemaContext *ctx, SourceLoc loc, const char *message, ...) {
   ctx->comp_unit->had_error = true;
@@ -85,7 +88,7 @@ static Symbol *scope_lookup(SemaContext *ctx, const char *name) {
 static Symbol *scope_lookup_type_name(SemaContext *ctx, const char *name) {
   for (Scope *sc = ctx->current_scope; sc != NULL; sc = sc->parent) {
     for (Symbol *sym = sc->symbols; sym != NULL; sym = sym->next) {
-      if (sym->name == name && (sym->kind == SYMBOL_TYPE || sym->type != TYPE_error)) {
+      if (sym->name == name && (sym->kind == SYMBOL_TYPE || sym->type != type_error)) {
         return sym;
       }
     }
@@ -123,6 +126,53 @@ static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type,
 
 Type *sema_expr_type(const SemaContext *ctx, const AstExpr *expr) {
   return expr->id < da_len(ctx->expr_types) ? ctx->expr_types[expr->id] : NULL;
+}
+
+// Whether `expr` denotes a location that can be assigned to.
+static bool is_lvalue(const AstExpr *expr) {
+  if (!expr) return false;
+
+  switch (expr->kind) {
+  case AST_EXPR_IDENTIFIER: {
+    Symbol *sym = expr->expr_identifier.symbol;
+    if (!sym) return false;
+
+    return sym->kind == SYMBOL_GLOBAL_VAR || sym->kind == SYMBOL_LOCAL_VAR;
+  }
+
+  case AST_EXPR_DEREF:
+    return true;
+
+  default:
+    return false;
+  }
+}
+
+// Names the kind of expression for diagnostics, e.g. "a literal".
+static const char *describe_expr(const AstExpr *expr) {
+  switch (expr->kind) {
+  case AST_EXPR_LITERAL:
+    return "a literal";
+  case AST_EXPR_IDENTIFIER:
+    return "a name";
+  case AST_EXPR_UNARY:
+  case AST_EXPR_BINARY:
+    return "an operator expression";
+  case AST_EXPR_ADDR_OF:
+    return "an address-of expression";
+  case AST_EXPR_DEREF:
+    return "a dereference";
+  case AST_EXPR_CAST:
+    return "a cast";
+  case AST_EXPR_ASSIGN:
+    return "an assignment";
+  case AST_EXPR_CALL:
+    return "a function call result";
+  case AST_EXPR_INVALID:
+    return "an invalid expression";
+  }
+
+  UNREACHABLE("unhandled expression kind");
 }
 
 // Nodes created during sema (implicit casts) have ids past the table, so it grows on demand.
@@ -169,7 +219,7 @@ static void sema_coerce(SemaContext *ctx, AstExpr **slot, Type *to) {
   AstExpr *expr = *slot;
   Type *from = sema_expr_type(ctx, expr);
 
-  if (from == TYPE_error || to == TYPE_error) {
+  if (from == type_error || to == type_error) {
     return;
   }
 
@@ -178,7 +228,7 @@ static void sema_coerce(SemaContext *ctx, AstExpr **slot, Type *to) {
     return;
   }
 
-  if (from != to) {
+  if (!type_equals(from, to)) {
     AstExpr *cast = ast_expr_new(&ctx->comp_unit->arena, AST_EXPR_CAST, expr->loc);
     cast->expr_cast.operand = expr;
     cast->expr_cast.implicit = true;
@@ -201,22 +251,24 @@ static bool sema_reject_type_name(SemaContext *ctx, const char *name, SourceLoc 
   return true;
 }
 
-// Types a literal: ints are untyped_int and floats untyped_float; char and string are not supported yet.
+// Types a literal
 static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
   switch (expr->expr_literal.kind) {
   case AST_LITERAL_INT:
-    return TYPE_untyped_int;
+    return type_untyped_int;
   case AST_LITERAL_FLOAT:
-    return TYPE_untyped_float;
+    return type_untyped_float;
+  case AST_LITERAL_NULL:
+    return type_untyped_null;
 
   case AST_LITERAL_CHAR:
   case AST_LITERAL_STRING:
     sema_error(ctx, expr->loc, "Literal type not yet supported in semantic analysis");
-    return TYPE_error;
+    return type_error;
   }
 
   sema_error(ctx, expr->loc, "Unknown literal type");
-  return TYPE_error;
+  return type_error;
 }
 
 static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
@@ -224,23 +276,285 @@ static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   if (!sym) {
     sema_error(ctx, expr->loc, "Undefined identifier '%s'", expr->expr_identifier.name);
 
-    scope_insert(ctx, expr->expr_identifier.name, SYMBOL_LOCAL_VAR, TYPE_error, expr->loc);
-    return TYPE_error;
+    scope_insert(ctx, expr->expr_identifier.name, SYMBOL_LOCAL_VAR, type_error, expr->loc);
+    return type_error;
   }
 
   if (sym->kind == SYMBOL_TYPE) {
     sema_error(ctx, expr->loc, "'%s' is a type, not a value", expr->expr_identifier.name);
-    return TYPE_error;
+    return type_error;
   }
 
   if (sym->kind == SYMBOL_FUNCTION) {
     sema_error(
       ctx, expr->loc, "'%s' is a function, not a value (did you mean to call it?)", expr->expr_identifier.name);
-    return TYPE_error;
+    return type_error;
   }
 
+  sym->is_used = true;
   expr->expr_identifier.symbol = sym;
   return sym->type;
+}
+
+static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
+  Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
+
+  if (operand_type == type_error) {
+    return type_error;
+  }
+
+  switch (expr->expr_unary.op) {
+  case UNOP_NEGATE:
+    if (!type_is_numeric(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '-' operator requires numeric type");
+      return type_error;
+    }
+
+    return operand_type;
+
+  case UNOP_NOT:
+    if (!type_is_bool(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
+      return type_error;
+    }
+
+    return operand_type;
+
+  case UNOP_COUNT:
+    sema_error(ctx, expr->loc, "Invalid unary operator");
+    return type_error;
+  }
+
+  sema_error(ctx, expr->loc, "Unknown unary operator");
+  return type_error;
+}
+
+static Type *sema_expr_addr_of(SemaContext *ctx, AstExpr *expr) {
+  AstExpr *operand = expr->expr_addr_of.operand;
+  Type *operand_type = sema_expr(ctx, operand);
+
+  if (operand_type != type_error && !is_lvalue(operand)) {
+    sema_error(ctx, expr->loc, "Cannot take the address of %s", describe_expr(operand));
+    return type_error;
+  }
+
+  if (operand_type == type_error) {
+    return type_error;
+  }
+
+  if (operand->kind == AST_EXPR_IDENTIFIER) {
+    Symbol *sym = operand->expr_identifier.symbol;
+    assert(sym->kind == SYMBOL_LOCAL_VAR && "sema rejects type and function names as values");
+    sym->local.is_address_taken = true;
+  }
+
+  return type_pointer_to(&ctx->comp_unit->arena, operand_type);
+}
+
+static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
+  AstExpr *operand = expr->expr_deref.operand;
+  Type *operand_type = sema_expr(ctx, operand);
+
+  if (operand_type == type_error) {
+    return type_error;
+  }
+
+  if (operand_type->kind != TYPE_KIND_POINTER) {
+    sema_error(ctx, expr->loc, "Cannot dereference non-pointer type '%s'", operand_type->name);
+    return type_error;
+  }
+
+  if (!type_has_storage(operand_type->pointer.base)) {
+    sema_error(ctx, expr->loc, "Cannot dereference '%s'", operand_type->name);
+    return type_error;
+  }
+
+  return operand_type->pointer.base;
+}
+
+// Types `ptr + int`, `int + ptr`, `ptr - int` (the pointer type) and `ptr - ptr` (i64, counted in elements).
+static Type *sema_pointer_arithmetic(SemaContext *ctx, AstExpr *expr, Type *left_type, Type *right_type) {
+  BinaryOp op = expr->expr_binary.op;
+  bool left_is_ptr = type_is_pointer(left_type);
+  bool right_is_ptr = type_is_pointer(right_type);
+
+  if (op != BINOP_ADD && op != BINOP_SUB) {
+    sema_error(ctx, expr->loc, "Pointer arithmetic only supports + and -");
+    return type_error;
+  }
+
+  Type *ptr_type = left_is_ptr ? left_type : right_type;
+  if (!type_has_storage(ptr_type->pointer.base)) {
+    sema_error(ctx, expr->loc, "Cannot do arithmetic on a pointer to '%s'", ptr_type->pointer.base->name);
+    return type_error;
+  }
+
+  if (left_is_ptr && right_is_ptr) {
+    if (op == BINOP_ADD) {
+      sema_error(ctx, expr->loc, "Cannot add two pointers");
+      return type_error;
+    }
+
+    if (!type_equals(left_type, right_type)) {
+      sema_error(ctx, expr->loc, "Cannot subtract '%s' from '%s'", right_type->name, left_type->name);
+      return type_error;
+    }
+
+    return type_i64;
+  }
+
+  if (right_is_ptr && op == BINOP_SUB) {
+    sema_error(ctx, expr->loc, "Cannot subtract a pointer from '%s'", left_type->name);
+    return type_error;
+  }
+
+  Type *offset_type = left_is_ptr ? right_type : left_type;
+  if (!type_is_integer(offset_type)) {
+    sema_error(ctx, expr->loc, "Pointer arithmetic needs an integer offset, got '%s'", offset_type->name);
+    return type_error;
+  }
+
+  sema_coerce(ctx, left_is_ptr ? &expr->expr_binary.right : &expr->expr_binary.left, type_i64);
+
+  return ptr_type;
+}
+
+// Checks the operands, converts both to a common type; arithmetic yields that type, comparisons bool.
+static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
+  Type *left_type = sema_expr(ctx, expr->expr_binary.left);
+  Type *right_type = sema_expr(ctx, expr->expr_binary.right);
+
+  if (left_type == type_error || right_type == type_error) {
+    return type_error;
+  }
+
+  switch (expr->expr_binary.op) {
+  case BINOP_ADD:
+  case BINOP_SUB:
+  case BINOP_MUL:
+  case BINOP_DIV:
+    if (type_is_pointer(left_type) || type_is_pointer(right_type)) {
+      return sema_pointer_arithmetic(ctx, expr, left_type, right_type);
+    }
+
+    if (!type_is_numeric(left_type) || !type_is_numeric(right_type)) {
+      sema_error(ctx, expr->loc, "Arithmetic operators require numeric operands");
+      return type_error;
+    }
+
+    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    if (!common_type) {
+      sema_error(
+        ctx, expr->loc, "Incompatible types for arithmetic (got '%s' and '%s')", left_type->name, right_type->name);
+      return type_error;
+    }
+
+    // Untyped operands stay untyped so a later consumer can pick the concrete type.
+    if (!type_is_untyped(common_type)) {
+      sema_coerce(ctx, &expr->expr_binary.left, common_type);
+      sema_coerce(ctx, &expr->expr_binary.right, common_type);
+    }
+
+    return common_type;
+
+  case BINOP_EQ:
+  case BINOP_NOT_EQ: {
+    if (!type_is_comparable(left_type) || !type_is_comparable(right_type)) {
+      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", left_type->name);
+      return type_error;
+    }
+
+    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    if (!common_type) {
+      sema_error(ctx, expr->loc, "Incompatible types for equality: '%s' and '%s'", left_type->name, right_type->name);
+      return type_error;
+    }
+
+    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
+    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
+
+    return type_bool;
+  }
+
+  case BINOP_LESS:
+  case BINOP_GREATER:
+  case BINOP_LESS_EQ:
+  case BINOP_GREATER_EQ: {
+    if (!type_is_orderable(left_type) || !type_is_orderable(right_type)) {
+      sema_error(ctx, expr->loc, "Comparisons require ordered types");
+      return type_error;
+    }
+
+    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    if (!common_type) {
+      sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
+      return type_error;
+    }
+
+    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
+    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
+
+    return type_bool;
+  }
+
+  case BINOP_COUNT:
+    sema_error(ctx, expr->loc, "Invalid binary operator");
+    return type_error;
+  }
+
+  sema_error(ctx, expr->loc, "Unknown binary operator");
+  return type_error;
+}
+
+// Types a cast node. Implicit casts are created by sema_coerce() with their type already set.
+static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
+  if (expr->expr_cast.implicit) {
+    return sema_expr_type(ctx, expr);
+  }
+
+  assert(expr->expr_cast.target && "Missing cast target");
+
+  AstExpr *operand = expr->expr_cast.operand;
+  Type *from = sema_expr(ctx, operand);
+  Type *to = sema_type(ctx, expr->expr_cast.target);
+
+  if (from == type_error || to == type_error) {
+    return to;
+  }
+
+  bool from_is_value = type_is_numeric(from) || from == type_bool;
+
+  if (from_is_value && type_is_numeric(to)) {
+    if (type_is_untyped(from)) {
+      sema_concretize(ctx, operand, type_can_widen_to(from, to) ? to : type_default(from));
+    }
+    return to;
+  }
+
+  if (from == type_untyped_null && type_is_pointer(to)) {
+    sema_concretize(ctx, operand, to);
+    return to;
+  }
+
+  if (type_is_pointer(from) && (type_is_pointer(to) || to == type_i64)) {
+    return to;
+  }
+
+  if (from == type_i64 && type_is_pointer(to)) {
+    return to;
+  }
+
+  if (from == to && from != type_void) {
+    return to;
+  }
+
+  if (to == type_bool && type_is_numeric(from)) {
+    sema_error(ctx, expr->loc, "Cannot cast from '%s' to 'bool'. Use x != 0", from->name);
+    return type_error;
+  }
+
+  sema_error(ctx, expr->loc, "Cannot cast from '%s' to '%s'", from->name, to->name);
+  return type_error;
 }
 
 static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
@@ -256,26 +570,33 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
                  "Invalid assignment target: '%s' is %s, not a variable",
                  target->expr_identifier.name,
                  sym->kind == SYMBOL_TYPE ? "a type" : "a function");
-      return TYPE_error;
+      return type_error;
     }
   }
 
   Type *target_type = sema_expr(ctx, target);
   Type *value_type = sema_expr(ctx, expr->expr_assign.value);
 
-  if (target_type == TYPE_error || value_type == TYPE_error) {
-    return TYPE_error;
+  if (target_type != type_error && !is_lvalue(target)) {
+    sema_error(ctx, expr->loc, "Invalid assignment target: %s cannot be assigned to", describe_expr(target));
+    return type_error;
   }
 
-  Symbol *target_sym = expr->expr_assign.target->expr_identifier.symbol;
-  if (!target_sym || (target_sym->kind != SYMBOL_LOCAL_VAR && target_sym->kind != SYMBOL_GLOBAL_VAR)) {
-    sema_error(ctx, expr->loc, "Invalid assignment target");
-    return TYPE_error;
+  if (target_type == type_error || value_type == type_error) {
+    return type_error;
+  }
+
+  if (target->kind == AST_EXPR_IDENTIFIER) {
+    Symbol *target_sym = target->expr_identifier.symbol;
+    if (!target_sym || (target_sym->kind != SYMBOL_LOCAL_VAR && target_sym->kind != SYMBOL_GLOBAL_VAR)) {
+      sema_error(ctx, expr->loc, "Invalid assignment target: '%s' is not a variable", target->expr_identifier.name);
+      return type_error;
+    }
   }
 
   if (!type_can_widen_to(value_type, target_type)) {
     sema_error(ctx, expr->loc, "Cannot assign '%s' to '%s'", value_type->name, target_type->name);
-    return TYPE_error;
+    return type_error;
   }
 
   sema_coerce(ctx, &expr->expr_assign.value, target_type);
@@ -296,7 +617,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   if (callee->kind != AST_EXPR_IDENTIFIER) {
     sema_error(ctx, expr->loc, "Function calls must be made to identifiers");
     sema_call_arguments(ctx, expr);
-    return TYPE_error;
+    return type_error;
   }
 
   Symbol *sym = scope_lookup(ctx, callee->expr_identifier.name);
@@ -304,13 +625,13 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   if (!sym) {
     sema_error(ctx, expr->loc, "Undefined function '%s'", callee->expr_identifier.name);
     sema_call_arguments(ctx, expr);
-    return TYPE_error;
+    return type_error;
   }
 
   if (sym->kind != SYMBOL_FUNCTION) {
     sema_error(ctx, expr->loc, "Expected function, got %s", callee->expr_identifier.name);
     sema_call_arguments(ctx, expr);
-    return TYPE_error;
+    return type_error;
   }
 
   TypeFunction *func_type = &sym->type->function;
@@ -323,7 +644,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
                sym->type->function.param_count,
                expr->expr_call.argument_count);
     sema_call_arguments(ctx, expr);
-    return TYPE_error;
+    return type_error;
   }
 
   bool arguments_ok = true;
@@ -332,7 +653,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     AstExpr *arg_expr = expr->expr_call.arguments[i];
     Type *arg_type = sema_expr(ctx, arg_expr);
 
-    if (arg_type == TYPE_error) {
+    if (arg_type == type_error) {
       arguments_ok = false;
       continue;
     }
@@ -354,161 +675,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     sema_coerce(ctx, &expr->expr_call.arguments[i], expected_type);
   }
 
-  return arguments_ok ? func_type->return_type : TYPE_error;
-}
-
-static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
-  Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
-
-  if (operand_type == TYPE_error) {
-    return TYPE_error;
-  }
-
-  switch (expr->expr_unary.op) {
-  case UNOP_NEGATE:
-    if (!type_is_numeric(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '-' operator requires numeric type");
-      return TYPE_error;
-    }
-
-    return operand_type;
-
-  case UNOP_NOT:
-    if (!type_is_bool(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
-      return TYPE_error;
-    }
-
-    return operand_type;
-
-  case UNOP_COUNT:
-    sema_error(ctx, expr->loc, "Invalid unary operator");
-    return TYPE_error;
-  }
-
-  sema_error(ctx, expr->loc, "Unknown unary operator");
-  return TYPE_error;
-}
-
-// Checks the operands, converts both to a common type; arithmetic yields that type, comparisons bool.
-static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
-  Type *left_type = sema_expr(ctx, expr->expr_binary.left);
-  Type *right_type = sema_expr(ctx, expr->expr_binary.right);
-
-  if (left_type == TYPE_error || right_type == TYPE_error) {
-    return TYPE_error;
-  }
-
-  switch (expr->expr_binary.op) {
-  case BINOP_ADD:
-  case BINOP_SUB:
-  case BINOP_MUL:
-  case BINOP_DIV:
-    if (!type_is_numeric(left_type) || !type_is_numeric(right_type)) {
-      sema_error(ctx, expr->loc, "Arithmetic operators require numeric operands");
-      return TYPE_error;
-    }
-
-    Type *common_type = get_widened_numeric_type(left_type, right_type);
-    if (!common_type) {
-      sema_error(
-        ctx, expr->loc, "Incompatible types for arithmetic (got '%s' and '%s')", left_type->name, right_type->name);
-      return TYPE_error;
-    }
-
-    // Untyped operands stay untyped so a later consumer can pick the concrete type.
-    if (!type_is_untyped(common_type)) {
-      sema_coerce(ctx, &expr->expr_binary.left, common_type);
-      sema_coerce(ctx, &expr->expr_binary.right, common_type);
-    }
-
-    return common_type;
-
-  case BINOP_EQ:
-  case BINOP_NOT_EQ: {
-    if (!type_is_comparable(left_type) || !type_is_comparable(right_type)) {
-      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", left_type->name);
-      return TYPE_error;
-    }
-
-    Type *common_type = get_widened_numeric_type(left_type, right_type);
-    if (!common_type) {
-      sema_error(ctx, expr->loc, "Incompatible types: '%s' and '%s'", left_type->name, right_type->name);
-      return TYPE_error;
-    }
-
-    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
-    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
-
-    return TYPE_bool;
-  }
-
-  case BINOP_LESS:
-  case BINOP_GREATER:
-  case BINOP_LESS_EQ:
-  case BINOP_GREATER_EQ: {
-    if (!type_is_orderable(left_type) || !type_is_orderable(right_type)) {
-      sema_error(ctx, expr->loc, "Comparisons require ordered types");
-      return TYPE_error;
-    }
-
-    Type *common_type = get_widened_numeric_type(left_type, right_type);
-    if (!common_type) {
-      sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
-      return TYPE_error;
-    }
-
-    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
-    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
-
-    return TYPE_bool;
-  }
-
-  case BINOP_COUNT:
-    sema_error(ctx, expr->loc, "Invalid binary operator");
-    return TYPE_error;
-  }
-
-  sema_error(ctx, expr->loc, "Unknown binary operator");
-  return TYPE_error;
-}
-
-// Types a cast node. Implicit casts are created by sema_coerce() with their type already set.
-static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
-  if (expr->expr_cast.implicit) {
-    return sema_expr_type(ctx, expr);
-  }
-
-  assert(expr->expr_cast.target && "Missing cast target");
-
-  AstExpr *operand = expr->expr_cast.operand;
-  Type *from = sema_expr(ctx, operand);
-  Type *to = sema_type(ctx, expr->expr_cast.target);
-
-  if (from == TYPE_error || to == TYPE_error) {
-    return to;
-  }
-
-  bool from_is_value = type_is_numeric(from) || from == TYPE_bool;
-
-  if (from_is_value && type_is_numeric(to)) {
-    if (type_is_untyped(from)) {
-      sema_concretize(ctx, operand, type_can_widen_to(from, to) ? to : type_default(from));
-    }
-    return to;
-  }
-
-  if (from == to && from != TYPE_void) {
-    return to;
-  }
-
-  if (to == TYPE_bool && type_is_numeric(from)) {
-    sema_error(ctx, expr->loc, "Cannot cast from '%s' to 'bool'. Use x != 0", from->name);
-    return TYPE_error;
-  }
-
-  sema_error(ctx, expr->loc, "Cannot cast from '%s' to '%s'", from->name, to->name);
-  return TYPE_error;
+  return arguments_ok ? func_type->return_type : type_error;
 }
 
 Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
@@ -525,16 +692,18 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
     result_type = sema_expr_identifier(ctx, expr);
     break;
 
-  case AST_EXPR_ASSIGN:
-    result_type = sema_expr_assignment(ctx, expr);
-    break;
-  case AST_EXPR_CALL:
-    result_type = sema_expr_call(ctx, expr);
-    break;
-
   case AST_EXPR_UNARY:
     result_type = sema_expr_unary(ctx, expr);
     break;
+
+  case AST_EXPR_ADDR_OF:
+    result_type = sema_expr_addr_of(ctx, expr);
+    break;
+
+  case AST_EXPR_DEREF:
+    result_type = sema_expr_deref(ctx, expr);
+    break;
+
   case AST_EXPR_BINARY:
     result_type = sema_expr_binary(ctx, expr);
     break;
@@ -543,9 +712,17 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
     result_type = sema_expr_cast(ctx, expr);
     break;
 
+  case AST_EXPR_ASSIGN:
+    result_type = sema_expr_assignment(ctx, expr);
+    break;
+
+  case AST_EXPR_CALL:
+    result_type = sema_expr_call(ctx, expr);
+    break;
+
   case AST_EXPR_INVALID:
-    sema_set_expr_type(ctx, expr, TYPE_error);
-    return TYPE_error;
+    sema_set_expr_type(ctx, expr, type_error);
+    return type_error;
   }
 
   assert(result_type && "every expression kind produces a type");
@@ -590,13 +767,13 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
 
   if (!type_has_storage(var_type)) {
     sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type '%s'", stmt->stmt_local_var.name, var_type->name);
-    var_type = TYPE_error;
+    var_type = type_error;
   }
 
   if (expected_type && init_type && !type_can_widen_to(init_type, var_type)) {
     sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, var_type->name);
 
-    scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, TYPE_error, stmt->loc);
+    scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, type_error, stmt->loc);
     return;
   }
 
@@ -605,7 +782,7 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
   }
 
   if (reuses_type_name) {
-    var_type = TYPE_error;
+    var_type = type_error;
   }
 
   Symbol *sym = scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, var_type, stmt->loc);
@@ -616,12 +793,13 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
     return;
   }
 
+  sym->is_defined = stmt->stmt_local_var.init != NULL;
   stmt->stmt_local_var.symbol = sym;
 }
 
 static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
   Type *expected_type = ctx->current_function->symbol->type->function.return_type;
-  Type *actual_type = TYPE_void;
+  Type *actual_type = type_void;
 
   if (stmt->stmt_return.value) {
     actual_type = sema_expr(ctx, stmt->stmt_return.value);
@@ -656,7 +834,7 @@ static void sema_stmt_continue(SemaContext *ctx, AstStmt *stmt) {
 
 static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_if.condition);
-  if (cond_type != TYPE_bool && cond_type != TYPE_error) {
+  if (cond_type != type_bool && cond_type != type_error) {
     sema_error(ctx, stmt->stmt_if.condition->loc, "Condition in 'if' must be of type 'bool'");
   }
 
@@ -668,7 +846,7 @@ static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
 
 static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_while.condition);
-  if (cond_type != TYPE_bool && cond_type != TYPE_error) {
+  if (cond_type != type_bool && cond_type != type_error) {
     sema_error(ctx, stmt->stmt_while.condition->loc, "Condition in 'while' must be of type 'bool'");
   }
 
@@ -727,7 +905,7 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
                  "Cannot declare parameter '%s' of type '%s'",
                  func->params[i].name,
                  param_types[i]->name);
-      param_types[i] = TYPE_error;
+      param_types[i] = type_error;
     }
   }
 
@@ -752,6 +930,8 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
   }
 
   sym->type = func_type;
+  sym->is_defined = func->body != NULL;
+  sym->function.decl = decl;
   func->symbol = sym;
 }
 
@@ -786,7 +966,7 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
     Type *type = func_type->function.param_types[i];
 
     if (sema_reject_type_name(ctx, param->name, param->loc)) {
-      scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, TYPE_error, param->loc);
+      scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, type_error, param->loc);
       continue;
     }
 
@@ -797,6 +977,8 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
       continue;
     }
 
+    sym->is_defined = true;
+    sym->local.is_param = true;
     param->symbol = sym;
   }
 
@@ -829,42 +1011,55 @@ static Type *sema_type_named(SemaContext *ctx, AstType *type) {
   Symbol *sym = scope_lookup_type_name(ctx, type->named);
   if (!sym) {
     sema_error(ctx, type->loc, "Undefined type '%s'", type->named);
-    return TYPE_error;
+    return type_error;
   }
 
   if (sym->kind != SYMBOL_TYPE) {
     const char *what = sym->kind == SYMBOL_FUNCTION ? "a function" : "a variable";
     sema_error(ctx, type->loc, "'%s' is %s, not a type (declared at line %zu)", type->named, what, sym->loc.line);
-    return TYPE_error;
+    return type_error;
   }
 
   return sym->type;
 }
 
+static Type *sema_type_pointer(SemaContext *ctx, AstType *type) {
+  Type *base_type = sema_type(ctx, type->pointer.base);
+
+  if (base_type == type_error) {
+    return type_error;
+  }
+
+  return type_pointer_to(&ctx->comp_unit->arena, base_type);
+}
+
 // Resolves a written type to a Type: no type means void, and pointer types are not implemented yet.
 Type *sema_type(SemaContext *ctx, AstType *type) {
   if (!type) {
-    return TYPE_void;
+    return type_void;
   }
 
   switch (type->kind) {
   case AST_TYPE_INVALID:
     sema_error(ctx, type->loc, "Invalid type");
-    return TYPE_error;
+    return type_error;
   case AST_TYPE_NAMED:
     return sema_type_named(ctx, type);
   case AST_TYPE_POINTER:
-    return TYPE_void;
+    return sema_type_pointer(ctx, type);
   }
 
   sema_error(ctx, type->loc, "Unknown type kind");
-  return TYPE_error;
+  return type_error;
 }
 
 // Semantic analysis functions
 
 static void sema_init_builtins(SemaContext *ctx) {
-#define TYPE_DEFINE(kind, size, ident) scope_insert_type(ctx, #ident, TYPE_##ident, (SourceLoc){0});
+#define TYPE_DEFINE(kind, size, ident)                            \
+  if (!type_is_internal(type_##ident)) {                          \
+    scope_insert_type(ctx, #ident, type_##ident, (SourceLoc){0}); \
+  }
   TYPES_BUILTIN(TYPE_DEFINE)
 #undef TYPE_DEFINE
 }

@@ -49,6 +49,9 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     case AST_LITERAL_FLOAT:
       printf("%f", node->expr_literal.float_value);
       return;
+    case AST_LITERAL_NULL:
+      printf("null");
+      return;
     case AST_LITERAL_CHAR:
       printf("'%c'", node->expr_literal.char_value);
       return;
@@ -63,26 +66,21 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
     printf("%s", node->expr_identifier.name);
     return;
 
-  case AST_EXPR_ASSIGN:
-    printf("(= ");
-    debug_print_ast_sexpr(arena, node->expr_assign.target);
-    printf(" ");
-    debug_print_ast_sexpr(arena, node->expr_assign.value);
-    printf(")");
-    return;
-  case AST_EXPR_CALL:
-    printf("(call ");
-    debug_print_ast_sexpr(arena, node->expr_call.callee);
-    for (size_t i = 0; i < node->expr_call.argument_count; i++) {
-      printf(" ");
-      debug_print_ast_sexpr(arena, node->expr_call.arguments[i]);
-    }
-    printf(")");
-    return;
-
   case AST_EXPR_UNARY:
     printf("(%s ", unop_strings[node->expr_unary.op]);
     debug_print_ast_sexpr(arena, node->expr_unary.operand);
+    printf(")");
+    return;
+
+  case AST_EXPR_ADDR_OF:
+    printf("(& ");
+    debug_print_ast_sexpr(arena, node->expr_addr_of.operand);
+    printf(")");
+    return;
+
+  case AST_EXPR_DEREF:
+    printf("(.* ");
+    debug_print_ast_sexpr(arena, node->expr_deref.operand);
     printf(")");
     return;
 
@@ -97,6 +95,24 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
   case AST_EXPR_CAST:
     printf("(cast ");
     debug_print_ast_sexpr(arena, node->expr_cast.operand);
+    printf(")");
+    return;
+
+  case AST_EXPR_ASSIGN:
+    printf("(= ");
+    debug_print_ast_sexpr(arena, node->expr_assign.target);
+    printf(" ");
+    debug_print_ast_sexpr(arena, node->expr_assign.value);
+    printf(")");
+    return;
+
+  case AST_EXPR_CALL:
+    printf("(call ");
+    debug_print_ast_sexpr(arena, node->expr_call.callee);
+    for (size_t i = 0; i < node->expr_call.argument_count; i++) {
+      printf(" ");
+      debug_print_ast_sexpr(arena, node->expr_call.arguments[i]);
+    }
     printf(")");
     return;
 
@@ -228,6 +244,7 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: <none>\n", i);
       continue;
 
+    // Define a register from a constant or another register
     case IR_OP_LOAD_INT:
       printf("%zu: r%u = %ld\n", i, inst->res.id, inst->int_lit);
       continue;
@@ -236,14 +253,22 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: r%u = %g\n", i, inst->res.id, inst->float_lit);
       continue;
 
-    case IR_OP_LOAD_VAR:
-      printf("%zu: r%u = LOAD_VAR %s\n", i, inst->res.id, inst->var.name);
-      continue;
-    case IR_OP_STORE_VAR:
-      printf("%zu: STORE_VAR %s = r%u\n", i, inst->var.name, inst->arg1.id);
+    case IR_OP_COPY:
+      printf("%zu: r%u = r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
 
-      // Unary operations
+    // Memory
+    case IR_OP_ALLOC:
+      printf("%zu: r%u = ALLOC %ld\n", i, inst->res.id, inst->int_lit);
+      continue;
+    case IR_OP_LOAD:
+      printf("%zu: r%u = LOAD [r%u]\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_STORE:
+      printf("%zu: STORE [r%u] = r%u\n", i, inst->arg2.id, inst->arg1.id);
+      continue;
+
+    // Unary arithmetic and logic
     case IR_OP_NEGATE:
       printf("%zu: r%u = -r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
@@ -251,7 +276,7 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: r%u = !r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
 
-      // Binary operations
+    // Binary arithmetic
     case IR_OP_ADD:
       printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
@@ -265,6 +290,7 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
 
+    // Comparisons; the result is a bool
     case IR_OP_CMP_EQ:
       printf("%zu: r%u = r%u == r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
@@ -284,6 +310,33 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: r%u = r%u >= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
 
+    // Conversions between integer and float
+    case IR_OP_ITOF:
+      printf("%zu: r%u = ITOF r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_FTOI:
+      printf("%zu: r%u = FTOI r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+
+    // Conversions that change the width of an integer
+    case IR_OP_SEXT:
+      printf("%zu: r%u = SEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_ZEXT:
+      printf("%zu: r%u = ZEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_TRUNC:
+      printf("%zu: r%u = TRUNC r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    // Conversions that change the width of a float
+    case IR_OP_FEXT:
+      printf("%zu: r%u = FEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_FTRUNC:
+      printf("%zu: r%u = FTRUNC r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+
+    // Control flow within a function
     case IR_OP_LABEL:
       printf("%zu: @l%u:\n", i, inst->target.id);
       continue;
@@ -297,6 +350,7 @@ void debug_print_ir_function(IrFunction *ir_func) {
       printf("%zu: JNZ r%u, @l%u, @l%u\n", i, inst->arg1.id, inst->target_true.id, inst->target_false.id);
       continue;
 
+    // Calls and returns
     case IR_OP_CALL:
       printf("%zu: CALL r%u, %s(", i, inst->res.id, inst->call.callee);
       for (size_t j = 0; j < inst->call.arg_count; j++) {
@@ -309,29 +363,6 @@ void debug_print_ir_function(IrFunction *ir_func) {
       continue;
     case IR_OP_RETURN:
       printf("%zu: RETURN r%u\n", i, inst->arg1.id);
-      continue;
-
-    case IR_OP_ITOF:
-      printf("%zu: r%u = ITOF r%u\n", i, inst->res.id, inst->arg1.id);
-      continue;
-    case IR_OP_FTOI:
-      printf("%zu: r%u = FTOI r%u\n", i, inst->res.id, inst->arg1.id);
-      continue;
-
-    case IR_OP_SEXT:
-      printf("%zu: r%u = SEXT r%u\n", i, inst->res.id, inst->arg1.id);
-      continue;
-    case IR_OP_ZEXT:
-      printf("%zu: r%u = ZEXT r%u\n", i, inst->res.id, inst->arg1.id);
-      continue;
-    case IR_OP_TRUNC:
-      printf("%zu: r%u = TRUNC r%u\n", i, inst->res.id, inst->arg1.id);
-      continue;
-    case IR_OP_FEXT:
-      printf("%zu: r%u = FEXT r%u\n", i, inst->res.id, inst->arg1.id);
-      continue;
-    case IR_OP_FTRUNC:
-      printf("%zu: r%u = FTRUNC r%u\n", i, inst->res.id, inst->arg1.id);
       continue;
     }
 

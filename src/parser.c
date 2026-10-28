@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "common.h"
 #include "lib/array.h"
+#include "token.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -16,8 +17,8 @@ typedef enum {
   PREC_TERM,       // + -
   PREC_FACTOR,     // * /
   PREC_CAST,       // as
-  PREC_UNARY,      // -
-  PREC_CALL,       // . () []
+  PREC_PREFIX,     // -
+  PREC_POSTFIX,    // . () []
 } Precedence;
 
 typedef AstExpr *(*ParsePrefixFn)(Parser *parser);
@@ -95,17 +96,6 @@ static const char *parse_identifier_name(Parser *parser, Token token) {
   }
 
   return st_intern_len(&parser->comp_unit->intern_table, token.lexeme, token.lexeme_len);
-}
-
-static inline bool is_lvalue(const AstExpr *node) {
-  if (!node) return false;
-
-  switch (node->kind) {
-  case AST_EXPR_IDENTIFIER:
-    return true;
-  default:
-    return false;
-  }
 }
 
 // Error recovery
@@ -278,6 +268,14 @@ static AstExpr *parse_float_literal(Parser *parser) {
   return expr;
 }
 
+// 'null'
+static AstExpr *parse_null_literal(Parser *parser) {
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
+  expr->expr_literal.kind = AST_LITERAL_NULL;
+
+  return expr;
+}
+
 // IDENT
 static AstExpr *parse_identifier(Parser *parser) {
   const char *identifier_name = parse_identifier_name(parser, parser->previous);
@@ -298,12 +296,81 @@ static AstExpr *parse_grouping(Parser *parser) {
   return expr;
 }
 
-// target '=' expression  -- target must be an identifier; right-associative.
-static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
-  if (!is_lvalue(left)) {
-    error_at(parser, parser->previous, "Invalid assignment target.");
+// ( '-' | '!' ) expression
+static AstExpr *parse_unary(Parser *parser) {
+  SourceLoc start_loc = parser->previous.loc;
+  TokenKind operator = parser->previous.kind;
+
+  AstExpr *op_expr = parse_precedence(parser, PREC_PREFIX);
+  if (!op_expr) return NULL;
+
+  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_UNARY, start_loc);
+  unary_expr->expr_unary.op = get_unary_op(operator);
+  unary_expr->expr_unary.operand = op_expr;
+
+  return unary_expr;
+}
+
+static AstExpr *parse_addr_of(Parser *parser) {
+  SourceLoc start_loc = parser->previous.loc;
+
+  AstExpr *operand = parse_precedence(parser, PREC_PREFIX);
+  if (!operand) return NULL;
+
+  AstExpr *addr_of_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_ADDR_OF, start_loc);
+  addr_of_expr->expr_addr_of.operand = operand;
+
+  return addr_of_expr;
+}
+
+static AstExpr *parse_deref(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+
+  AstExpr *deref_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_DEREF, parser->previous.loc);
+  deref_expr->expr_deref.operand = left;
+
+  return deref_expr;
+}
+
+// left ( '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '>' | '<=' | '>=' ) right  -- left-associative.
+static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
+  SourceLoc start_loc = parser->previous.loc;
+  TokenKind operator = parser->previous.kind;
+
+  const ParseRule *rule = get_rule(operator);
+  AstExpr *right = parse_precedence(parser, rule->precedence + 1);
+  if (!left || !right) return NULL;
+
+  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_BINARY, start_loc);
+  binary_expr->expr_binary.op = get_binary_op(operator);
+  binary_expr->expr_binary.left = left;
+  binary_expr->expr_binary.right = right;
+
+  return binary_expr;
+}
+
+// expression 'as' type  -- the 'as' is already consumed.
+static AstExpr *parse_cast(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+  SourceLoc start_loc = parser->previous.loc;
+
+  AstType *type = parse_type(parser);
+  if (!type) {
+    error_at(parser, parser->current, "Expected type after 'as'.");
     return NULL;
   }
+
+  AstExpr *cast_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_CAST, start_loc);
+  cast_expr->expr_cast.operand = left;
+  cast_expr->expr_cast.target = type;
+
+  return cast_expr;
+}
+
+// target '=' expression  -- right-associative; sema checks that the target can be assigned to.
+static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+
   SourceLoc start_loc = left->loc;
 
   AstExpr *right = parse_precedence(parser, PREC_ASSIGNMENT);
@@ -345,56 +412,6 @@ static AstExpr *parse_call(Parser *parser, AstExpr *left) {
   da_free(args);
 
   return call_expr;
-}
-
-// expression 'as' type  -- the 'as' is already consumed.
-static AstExpr *parse_cast(Parser *parser, AstExpr *left) {
-  if (!left) return NULL;
-  SourceLoc start_loc = parser->previous.loc;
-
-  AstType *type = parse_type(parser);
-  if (!type) {
-    error_at(parser, parser->current, "Expected type after 'as'.");
-    return NULL;
-  }
-
-  AstExpr *cast_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_CAST, start_loc);
-  cast_expr->expr_cast.operand = left;
-  cast_expr->expr_cast.target = type;
-
-  return cast_expr;
-}
-
-// ( '-' | '!' ) expression
-static AstExpr *parse_unary(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
-  TokenKind operator = parser->previous.kind;
-
-  AstExpr *op_expr = parse_precedence(parser, PREC_UNARY);
-  if (!op_expr) return NULL;
-
-  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_UNARY, start_loc);
-  unary_expr->expr_unary.op = get_unary_op(operator);
-  unary_expr->expr_unary.operand = op_expr;
-
-  return unary_expr;
-}
-
-// left ( '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '>' | '<=' | '>=' ) right  -- left-associative.
-static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
-  SourceLoc start_loc = parser->previous.loc;
-  TokenKind operator = parser->previous.kind;
-
-  const ParseRule *rule = get_rule(operator);
-  AstExpr *right = parse_precedence(parser, rule->precedence + 1);
-  if (!left || !right) return NULL;
-
-  AstExpr *binary_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_BINARY, start_loc);
-  binary_expr->expr_binary.op = get_binary_op(operator);
-  binary_expr->expr_binary.left = left;
-  binary_expr->expr_binary.right = right;
-
-  return binary_expr;
 }
 
 // Statement parsing functions
@@ -779,26 +796,44 @@ AstProgram *parse_program(Parser *parser) {
 
 // Parse rules and operator mappings
 
+// Entries run from the loosest infix operator to the tightest, mirroring Precedence.
+// Prefix-only tokens have no infix function, so their precedence stays PREC_NONE.
 static const ParseRule rules[TOKEN_COUNT] = {
+  // Operands
   [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
   [TOKEN_INT] = {PREC_NONE, parse_int_literal, NULL},
   [TOKEN_FLOAT] = {PREC_NONE, parse_float_literal, NULL},
+  [TOKEN_NULL] = {PREC_NONE, parse_null_literal, NULL},
 
-  [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},
-  [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
-  [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
-  [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
+  // Prefix-only operators
+  [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
+  [TOKEN_AMP] = {PREC_NONE, parse_addr_of, NULL},
 
+  // Assignment
+  [TOKEN_ASSIGN] = {PREC_ASSIGNMENT, NULL, parse_assignment},
+
+  // Equality
+  [TOKEN_EQ] = {PREC_EQUALITY, NULL, parse_binary},
+  [TOKEN_NOT_EQ] = {PREC_EQUALITY, NULL, parse_binary},
+
+  // Comparison
   [TOKEN_LESS] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_GREATER] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_LESS_EQ] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_GREATER_EQ] = {PREC_COMPARISON, NULL, parse_binary},
-  [TOKEN_EQ] = {PREC_EQUALITY, NULL, parse_binary},
-  [TOKEN_NOT_EQ] = {PREC_EQUALITY, NULL, parse_binary},
-  [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
 
-  [TOKEN_ASSIGN] = {PREC_ASSIGNMENT, NULL, parse_assignment},
+  // Additive; '-' is also the prefix negation
+  [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},
+  [TOKEN_MINUS] = {PREC_TERM, parse_unary, parse_binary},
+
+  // Multiplicative
+  [TOKEN_STAR] = {PREC_FACTOR, NULL, parse_binary},
+  [TOKEN_SLASH] = {PREC_FACTOR, NULL, parse_binary},
+
+  // Cast
   [TOKEN_AS] = {PREC_CAST, NULL, parse_cast},
 
-  [TOKEN_LPAREN] = {PREC_CALL, parse_grouping, parse_call},
+  // Postfix and grouping; '(' is the call operator and also starts a parenthesised expression
+  [TOKEN_LPAREN] = {PREC_POSTFIX, parse_grouping, parse_call},
+  [TOKEN_DEREF] = {PREC_POSTFIX, NULL, parse_deref},
 };

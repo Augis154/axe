@@ -1,4 +1,5 @@
 #include "lexer.h"
+#include "token.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -199,12 +200,21 @@ Token lexer_get_token(Lexer *lex) {
   char c = advance(lex);
 
   switch (c) {
+  case '.':
+    if (peek(lex) == '*') {
+      advance(lex);
+      return new_token(lex, TOKEN_DEREF);
+    }
+    return new_token(lex, TOKEN_DOT);
   case ',':
     return new_token(lex, TOKEN_COMMA);
   case ':':
     return new_token(lex, TOKEN_COLON);
   case ';':
     return new_token(lex, TOKEN_SEMICOLON);
+
+  case '&':
+    return new_token(lex, TOKEN_AMP);
 
   case '(':
     return new_token(lex, TOKEN_LPAREN);

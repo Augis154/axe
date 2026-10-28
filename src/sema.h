@@ -9,22 +9,40 @@
 #include <stdint.h>
 
 typedef enum {
-  SYMBOL_TYPE,
   SYMBOL_LOCAL_VAR,
   SYMBOL_GLOBAL_VAR,
   SYMBOL_FUNCTION,
+  SYMBOL_TYPE,
 } SymbolKind;
+
+typedef struct {
+  bool is_param;
+  bool is_address_taken;
+} SymbolLocal;
+
+typedef struct {
+  AstDecl *decl;
+  bool is_extern;
+} SymbolFunction;
 
 struct Symbol_ {
   SymbolKind kind;
   uint32_t id;
 
-  SourceLoc loc;
-
   const char *name;
   Type *type;
 
+  SourceLoc loc;
+
   struct Symbol_ *next;
+
+  bool is_used;
+  bool is_defined;
+
+  union {
+    SymbolLocal local;
+    SymbolFunction function;
+  };
 };
 
 typedef struct Scope_ {
