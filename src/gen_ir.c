@@ -51,9 +51,9 @@ static inline IrFunction *get_current_func(IrGenContext *ctx) {
 }
 
 static IrReg next_ir_reg(IrGenContext *ctx, IrType type) {
-  IrFunction *current_func = get_current_func(ctx);
+  IrFunction *func = get_current_func(ctx);
   IrReg reg = (IrReg){.id = (ctx)->next_reg++};
-  da_append(current_func->reg_types, type);
+  da_append(func->reg_types, type);
   return reg;
 }
 
@@ -84,8 +84,8 @@ static IrReg get_symbol_reg(IrGenContext *ctx, Symbol *sym) {
   return reg;
 }
 
-static void emit_ir_instr(IrGenContext *ctx, IrInstr instr) {
-  if (instr.op == IR_OP_LABEL) {
+static void emit_ir_inst(IrGenContext *ctx, IrInstr inst) {
+  if (inst.op == IR_OP_LABEL) {
     ctx->block_terminated = false;
   }
 
@@ -93,10 +93,10 @@ static void emit_ir_instr(IrGenContext *ctx, IrInstr instr) {
     return;
   }
 
-  IrFunction *current_func = get_current_func(ctx);
-  da_append(current_func->buffer, instr);
+  IrFunction *func = get_current_func(ctx);
+  da_append(func->buffer, inst);
 
-  if (instr.op == IR_OP_JUMP || instr.op == IR_OP_RETURN) {
+  if (inst.op == IR_OP_JUMP || inst.op == IR_OP_RETURN) {
     ctx->block_terminated = true;
   }
 }
@@ -109,22 +109,22 @@ static IrReg emit_int_const(IrGenContext *ctx, int64_t value, IrType type) {
     .res = reg,
     .int_lit = value,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
   return reg;
 }
 
 static IrReg queue_entry_alloc(IrGenContext *ctx, uint32_t size) {
-  IrReg slot = next_ir_reg(ctx, IR_TYPE_PTR);
+  IrReg slot_reg = next_ir_reg(ctx, IR_TYPE_PTR);
 
-  IrInstr alloc = {
+  IrInstr alloc_inst = {
     .op = IR_OP_ALLOC,
-    .res = slot,
+    .res = slot_reg,
     .int_lit = size,
   };
-  da_append(ctx->entry_allocs, alloc);
+  da_append(ctx->entry_allocs, alloc_inst);
 
-  return slot;
+  return slot_reg;
 }
 
 static inline bool ir_type_is_float(IrType type) {
@@ -157,24 +157,24 @@ static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_ty
 
   assert(from_ir != IR_TYPE_NONE && to_ir != IR_TYPE_NONE && "cast between non-value types");
 
-  IrReg dest_reg = next_reg(ctx, to_type);
+  IrReg res = next_reg(ctx, to_type);
 
   IrInstr inst = {
     .op = conversion_op(from_ir, to_ir),
-    .res = dest_reg,
+    .res = res,
     .arg1 = src_reg,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
-  return dest_reg;
+  return res;
 }
 
 // Expression handling
 
-static IrReg emit_expression(IrGenContext *ctx, AstExpr *node);
+static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr);
 
-static inline Type *expr_type(IrGenContext *ctx, AstExpr *node) {
-  return sema_expr_type(ctx->sema_ctx, node);
+static inline Type *expr_type(IrGenContext *ctx, AstExpr *expr) {
+  return sema_expr_type(ctx->sema_ctx, expr);
 }
 
 static IrOp get_unary_ir_op(UnaryOp op) {
@@ -222,10 +222,10 @@ static IrOp get_binary_ir_op(BinaryOp op) {
   UNREACHABLE("unhandled binary operator");
 }
 
-static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_literal: node is NULL");
+static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_literal: expr is NULL");
 
-  AstExprLiteral *literal = &node->expr_literal;
+  AstExprLiteral *literal = &expr->expr_literal;
 
   switch (literal->kind) {
   case AST_LITERAL_INT:
@@ -238,7 +238,7 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
     UNREACHABLE("sema rejects string literals");
   }
 
-  Type *type = expr_type(ctx, node);
+  Type *type = expr_type(ctx, expr);
   IrReg res = next_reg(ctx, type);
 
   IrInstr inst = {.res = res};
@@ -251,117 +251,118 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *node) {
     inst.int_lit = literal->kind == AST_LITERAL_NULL ? 0 : literal->int_value;
   }
 
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_identifier(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_identifier: node is NULL");
+static IrReg emit_identifier(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_identifier: expr is NULL");
 
-  Symbol *sym = node->expr_identifier.symbol;
+  Symbol *sym = expr->expr_identifier.symbol;
   IrReg reg = get_symbol_reg(ctx, sym);
 
   if (sym->local.is_address_taken) {
-    IrReg val_reg = next_reg(ctx, sym->type);
+    IrReg value_reg = next_reg(ctx, sym->type);
 
     IrInstr inst = {
       .op = IR_OP_LOAD,
-      .res = val_reg,
+      .res = value_reg,
       .arg1 = reg,
     };
-    emit_ir_instr(ctx, inst);
+    emit_ir_inst(ctx, inst);
 
-    return val_reg;
+    return value_reg;
   }
 
   return reg;
 }
 
-static IrReg emit_assignment(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_assignment: node is NULL");
+static IrReg emit_assignment(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_assignment: expr is NULL");
 
-  AstExpr *target = node->expr_assign.target;
+  AstExpr *target = expr->expr_assign.target;
 
   if (target->kind == AST_EXPR_DEREF) {
     IrReg ptr_reg = emit_expression(ctx, target->expr_deref.operand);
-    IrReg val_reg = emit_expression(ctx, node->expr_assign.value);
+    IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
 
     IrInstr inst = {
       .op = IR_OP_STORE,
-      .arg1 = val_reg,
+      .arg1 = value_reg,
       .arg2 = ptr_reg,
     };
-    emit_ir_instr(ctx, inst);
+    emit_ir_inst(ctx, inst);
 
-    return val_reg;
+    return value_reg;
   }
 
   Symbol *target_sym = target->expr_identifier.symbol;
   IrReg target_reg = get_symbol_reg(ctx, target_sym);
 
-  IrReg value = emit_expression(ctx, node->expr_assign.value);
+  IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
 
-  IrInstr inst = target_sym->local.is_address_taken ? (IrInstr){.op = IR_OP_STORE, .arg1 = value, .arg2 = target_reg}
-                                                    : (IrInstr){.op = IR_OP_COPY, .res = target_reg, .arg1 = value};
-  emit_ir_instr(ctx, inst);
+  IrInstr inst = target_sym->local.is_address_taken
+                   ? (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = target_reg}
+                   : (IrInstr){.op = IR_OP_COPY, .res = target_reg, .arg1 = value_reg};
+  emit_ir_inst(ctx, inst);
 
-  return value;
+  return value_reg;
 }
 
-static IrReg emit_call(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_call: node is NULL");
+static IrReg emit_call(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_call: expr is NULL");
 
-  IrReg *arg_params = NULL;
-  size_t arg_count = node->expr_call.argument_count;
+  IrReg *arg_regs = NULL;
+  size_t arg_count = expr->expr_call.argument_count;
 
   if (arg_count > 0) {
-    arg_params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * arg_count);
+    arg_regs = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * arg_count);
 
     for (size_t i = 0; i < arg_count; i++) {
-      AstExpr *arg_expr = node->expr_call.arguments[i];
+      AstExpr *arg_expr = expr->expr_call.arguments[i];
 
-      arg_params[i] = emit_expression(ctx, arg_expr);
+      arg_regs[i] = emit_expression(ctx, arg_expr);
     }
   }
 
-  IrReg res = next_reg(ctx, expr_type(ctx, node));
+  IrReg res = next_reg(ctx, expr_type(ctx, expr));
 
   IrInstr inst = {
     .op = IR_OP_CALL,
     .res = res,
     .call =
       {
-        .callee = node->expr_call.callee->expr_identifier.name,
-        .args = arg_params,
+        .callee = expr->expr_call.callee->expr_identifier.name,
+        .args = arg_regs,
         .arg_count = arg_count,
       },
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_unary_op: node is NULL");
+static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_unary_op: expr is NULL");
 
-  IrReg operand = emit_expression(ctx, node->expr_unary.operand);
-  IrReg res = next_reg(ctx, expr_type(ctx, node));
+  IrReg operand_reg = emit_expression(ctx, expr->expr_unary.operand);
+  IrReg res = next_reg(ctx, expr_type(ctx, expr));
 
   IrInstr inst = {
-    .op = get_unary_ir_op(node->expr_unary.op),
+    .op = get_unary_ir_op(expr->expr_unary.op),
     .res = res,
-    .arg1 = operand,
+    .arg1 = operand_reg,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_addr_of: node is NULL");
+static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_addr_of: expr is NULL");
 
-  AstExpr *operand = node->expr_addr_of.operand;
+  AstExpr *operand = expr->expr_addr_of.operand;
 
   if (operand->kind == AST_EXPR_DEREF) {
     return emit_expression(ctx, operand->expr_deref.operand);
@@ -373,142 +374,142 @@ static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *node) {
   return get_symbol_reg(ctx, sym);
 }
 
-static IrReg emit_deref(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_deref: node is NULL");
+static IrReg emit_deref(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_deref: expr is NULL");
 
-  IrReg ptr_reg = emit_expression(ctx, node->expr_deref.operand);
-  IrReg val_reg = next_reg(ctx, expr_type(ctx, node));
+  IrReg ptr_reg = emit_expression(ctx, expr->expr_deref.operand);
+  IrReg value_reg = next_reg(ctx, expr_type(ctx, expr));
 
   IrInstr inst = {
     .op = IR_OP_LOAD,
-    .res = val_reg,
+    .res = value_reg,
     .arg1 = ptr_reg,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
-  return val_reg;
+  return value_reg;
 }
 
 // `ptr +- int` moves by whole elements and `ptr - ptr` counts them, so offsets are scaled by the pointee size.
-static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *node) {
-  AstExpr *left_node = node->expr_binary.left;
-  AstExpr *right_node = node->expr_binary.right;
-  Type *left_type = expr_type(ctx, left_node);
-  Type *right_type = expr_type(ctx, right_node);
+static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *expr) {
+  AstExpr *left_expr = expr->expr_binary.left;
+  AstExpr *right_expr = expr->expr_binary.right;
+  Type *left_type = expr_type(ctx, left_expr);
+  Type *right_type = expr_type(ctx, right_expr);
 
-  IrReg left = emit_expression(ctx, left_node);
-  IrReg right = emit_expression(ctx, right_node);
+  IrReg left_reg = emit_expression(ctx, left_expr);
+  IrReg right_reg = emit_expression(ctx, right_expr);
 
   bool left_is_ptr = type_is_pointer(left_type);
   Type *ptr_type = left_is_ptr ? left_type : right_type;
   int64_t element_size = ptr_type->pointer.base->size;
 
   if (type_is_pointer(left_type) && type_is_pointer(right_type)) {
-    IrReg bytes = next_ir_reg(ctx, IR_TYPE_I64);
+    IrReg bytes_reg = next_ir_reg(ctx, IR_TYPE_I64);
 
-    IrInstr sub = {.op = IR_OP_SUB, .res = bytes, .arg1 = left, .arg2 = right};
-    emit_ir_instr(ctx, sub);
+    IrInstr sub_inst = {.op = IR_OP_SUB, .res = bytes_reg, .arg1 = left_reg, .arg2 = right_reg};
+    emit_ir_inst(ctx, sub_inst);
 
     if (element_size == 1) {
-      return bytes;
+      return bytes_reg;
     }
 
     IrReg size_reg = emit_int_const(ctx, element_size, IR_TYPE_I64);
-    IrReg count = next_ir_reg(ctx, IR_TYPE_I64);
+    IrReg count_reg = next_ir_reg(ctx, IR_TYPE_I64);
 
-    IrInstr div = {.op = IR_OP_DIV, .res = count, .arg1 = bytes, .arg2 = size_reg};
-    emit_ir_instr(ctx, div);
+    IrInstr div_inst = {.op = IR_OP_DIV, .res = count_reg, .arg1 = bytes_reg, .arg2 = size_reg};
+    emit_ir_inst(ctx, div_inst);
 
-    return count;
+    return count_reg;
   }
 
-  IrReg ptr = left_is_ptr ? left : right;
-  IrReg offset = left_is_ptr ? right : left;
+  IrReg ptr_reg = left_is_ptr ? left_reg : right_reg;
+  IrReg offset_reg = left_is_ptr ? right_reg : left_reg;
 
   if (element_size != 1) {
     IrReg size_reg = emit_int_const(ctx, element_size, IR_TYPE_I64);
-    IrReg bytes = next_ir_reg(ctx, IR_TYPE_I64);
+    IrReg bytes_reg = next_ir_reg(ctx, IR_TYPE_I64);
 
-    IrInstr mul = {.op = IR_OP_MUL, .res = bytes, .arg1 = offset, .arg2 = size_reg};
-    emit_ir_instr(ctx, mul);
+    IrInstr mul_inst = {.op = IR_OP_MUL, .res = bytes_reg, .arg1 = offset_reg, .arg2 = size_reg};
+    emit_ir_inst(ctx, mul_inst);
 
-    offset = bytes;
+    offset_reg = bytes_reg;
   }
 
   IrReg res = next_ir_reg(ctx, IR_TYPE_PTR);
 
-  IrInstr inst = {.op = get_binary_ir_op(node->expr_binary.op), .res = res, .arg1 = ptr, .arg2 = offset};
-  emit_ir_instr(ctx, inst);
+  IrInstr inst = {.op = get_binary_ir_op(expr->expr_binary.op), .res = res, .arg1 = ptr_reg, .arg2 = offset_reg};
+  emit_ir_inst(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_binary_op: node is NULL");
+static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_binary_op: expr is NULL");
 
-  BinaryOp op = node->expr_binary.op;
+  BinaryOp op = expr->expr_binary.op;
   bool is_arithmetic = op == BINOP_ADD || op == BINOP_SUB;
-  if (is_arithmetic && (type_is_pointer(expr_type(ctx, node->expr_binary.left)) ||
-                        type_is_pointer(expr_type(ctx, node->expr_binary.right)))) {
-    return emit_pointer_arithmetic(ctx, node);
+  if (is_arithmetic && (type_is_pointer(expr_type(ctx, expr->expr_binary.left)) ||
+                        type_is_pointer(expr_type(ctx, expr->expr_binary.right)))) {
+    return emit_pointer_arithmetic(ctx, expr);
   }
 
-  IrReg left = emit_expression(ctx, node->expr_binary.left);
-  IrReg right = emit_expression(ctx, node->expr_binary.right);
-  IrReg res = next_reg(ctx, expr_type(ctx, node));
+  IrReg left_reg = emit_expression(ctx, expr->expr_binary.left);
+  IrReg right_reg = emit_expression(ctx, expr->expr_binary.right);
+  IrReg res = next_reg(ctx, expr_type(ctx, expr));
 
   IrInstr inst = {
-    .op = get_binary_ir_op(node->expr_binary.op),
+    .op = get_binary_ir_op(expr->expr_binary.op),
     .res = res,
-    .arg1 = left,
-    .arg2 = right,
+    .arg1 = left_reg,
+    .arg2 = right_reg,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 
   return res;
 }
 
-static IrReg emit_cast(IrGenContext *ctx, AstExpr *node) {
-  assert(node && "emit_cast: node is NULL");
+static IrReg emit_cast(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_cast: expr is NULL");
 
-  AstExpr *operand = node->expr_cast.operand;
-  IrReg value = emit_expression(ctx, operand);
+  AstExpr *operand = expr->expr_cast.operand;
+  IrReg value_reg = emit_expression(ctx, operand);
 
-  return emit_cast_if_needed(ctx, value, expr_type(ctx, operand), expr_type(ctx, node));
+  return emit_cast_if_needed(ctx, value_reg, expr_type(ctx, operand), expr_type(ctx, expr));
 }
 
-static IrReg emit_expression(IrGenContext *ctx, AstExpr *node) {
-  if (!node) {
+static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
+  if (!expr) {
     return NULL_REG;
   }
 
-  switch (node->kind) {
+  switch (expr->kind) {
   case AST_EXPR_LITERAL:
-    return emit_literal(ctx, node);
+    return emit_literal(ctx, expr);
 
   case AST_EXPR_IDENTIFIER:
-    return emit_identifier(ctx, node);
+    return emit_identifier(ctx, expr);
 
   case AST_EXPR_UNARY:
-    return emit_unary_op(ctx, node);
+    return emit_unary_op(ctx, expr);
 
   case AST_EXPR_ADDR_OF:
-    return emit_addr_of(ctx, node);
+    return emit_addr_of(ctx, expr);
 
   case AST_EXPR_DEREF:
-    return emit_deref(ctx, node);
+    return emit_deref(ctx, expr);
 
   case AST_EXPR_BINARY:
-    return emit_binary_op(ctx, node);
+    return emit_binary_op(ctx, expr);
 
   case AST_EXPR_CAST:
-    return emit_cast(ctx, node);
+    return emit_cast(ctx, expr);
 
   case AST_EXPR_ASSIGN:
-    return emit_assignment(ctx, node);
+    return emit_assignment(ctx, expr);
 
   case AST_EXPR_CALL:
-    return emit_call(ctx, node);
+    return emit_call(ctx, expr);
 
   case AST_EXPR_INVALID:
     UNREACHABLE("AST_EXPR_INVALID reached IR generation");
@@ -550,17 +551,17 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
 
   if (init_reg.id == NULL_REG.id) {
     init_reg = next_reg(ctx, sym->type);
-    IrInstr zero = {.res = init_reg};
+    IrInstr zero_inst = {.res = init_reg};
 
     if (ir_type_is_float(get_ir_type(sym->type))) {
-      zero.op = IR_OP_LOAD_FLOAT;
-      zero.float_lit = 0.0;
+      zero_inst.op = IR_OP_LOAD_FLOAT;
+      zero_inst.float_lit = 0.0;
     } else {
-      zero.op = IR_OP_LOAD_INT;
-      zero.int_lit = 0;
+      zero_inst.op = IR_OP_LOAD_INT;
+      zero_inst.int_lit = 0;
     }
 
-    emit_ir_instr(ctx, zero);
+    emit_ir_inst(ctx, zero_inst);
   }
 
   if (in_memory) {
@@ -569,7 +570,7 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
       .arg1 = init_reg,
       .arg2 = reg,
     };
-    emit_ir_instr(ctx, inst);
+    emit_ir_inst(ctx, inst);
 
     return;
   }
@@ -579,19 +580,19 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
     .res = reg,
     .arg1 = init_reg,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 }
 
 static void emit_stmt_return(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_return: stmt is NULL");
 
-  IrReg value = emit_expression(ctx, stmt->stmt_return.value);
+  IrReg value_reg = emit_expression(ctx, stmt->stmt_return.value);
 
   IrInstr inst = {
     .op = IR_OP_RETURN,
-    .arg1 = value,
+    .arg1 = value_reg,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 }
 
 static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
@@ -603,7 +604,7 @@ static void emit_stmt_break(IrGenContext *ctx, AstStmt *stmt) {
     .op = IR_OP_JUMP,
     .target = ctx->current_loop->break_label,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 }
 
 static void emit_stmt_continue(IrGenContext *ctx, AstStmt *stmt) {
@@ -615,7 +616,7 @@ static void emit_stmt_continue(IrGenContext *ctx, AstStmt *stmt) {
     .op = IR_OP_JUMP,
     .target = ctx->current_loop->continue_label,
   };
-  emit_ir_instr(ctx, inst);
+  emit_ir_inst(ctx, inst);
 }
 
 static void emit_stmt_if(IrGenContext *ctx, AstStmt *stmt) {
@@ -628,48 +629,48 @@ static void emit_stmt_if(IrGenContext *ctx, AstStmt *stmt) {
   // Conditional jump
   IrReg cond_reg = emit_expression(ctx, stmt->stmt_if.condition);
 
-  IrInstr cond_jump_instr = {
+  IrInstr cond_jump_inst = {
     .op = IR_OP_JNZ,
     .arg1 = cond_reg,
     .target_true = then_label,
     .target_false = else_label,
   };
-  emit_ir_instr(ctx, cond_jump_instr);
+  emit_ir_inst(ctx, cond_jump_inst);
 
   // Then branch
-  IrInstr then_label_instr = {
+  IrInstr then_label_inst = {
     .op = IR_OP_LABEL,
     .target = then_label,
   };
-  emit_ir_instr(ctx, then_label_instr);
+  emit_ir_inst(ctx, then_label_inst);
 
   emit_statement(ctx, stmt->stmt_if.then_branch);
 
   // Jump to end if the then branch is not terminated
   if (!ctx->block_terminated) {
-    IrInstr jump_to_end_instr = {
+    IrInstr jump_to_end_inst = {
       .op = IR_OP_JUMP,
       .target = end_label,
     };
-    emit_ir_instr(ctx, jump_to_end_instr);
+    emit_ir_inst(ctx, jump_to_end_inst);
   }
 
   // Else branch
   if (stmt->stmt_if.else_branch) {
-    IrInstr else_label_instr = {
+    IrInstr else_label_inst = {
       .op = IR_OP_LABEL,
       .target = else_label,
     };
-    emit_ir_instr(ctx, else_label_instr);
+    emit_ir_inst(ctx, else_label_inst);
 
     emit_statement(ctx, stmt->stmt_if.else_branch);
   }
 
-  IrInstr end_label_instr = {
+  IrInstr end_label_inst = {
     .op = IR_OP_LABEL,
     .target = end_label,
   };
-  emit_ir_instr(ctx, end_label_instr);
+  emit_ir_inst(ctx, end_label_inst);
 }
 
 static void emit_stmt_while(IrGenContext *ctx, AstStmt *stmt) {
@@ -686,43 +687,43 @@ static void emit_stmt_while(IrGenContext *ctx, AstStmt *stmt) {
   };
   ctx->current_loop = &loop_labels;
 
-  IrInstr start_label_instr = {
+  IrInstr start_label_inst = {
     .op = IR_OP_LABEL,
     .target = start_label,
   };
-  emit_ir_instr(ctx, start_label_instr);
+  emit_ir_inst(ctx, start_label_inst);
 
   IrReg cond_reg = emit_expression(ctx, stmt->stmt_while.condition);
 
-  IrInstr cond_jump_instr = {
+  IrInstr cond_jump_inst = {
     .op = IR_OP_JNZ,
     .arg1 = cond_reg,
     .target_true = fallthrough_label,
     .target_false = end_label,
   };
-  emit_ir_instr(ctx, cond_jump_instr);
+  emit_ir_inst(ctx, cond_jump_inst);
 
-  IrInstr fallthrough_label_instr = {
+  IrInstr fallthrough_label_inst = {
     .op = IR_OP_LABEL,
     .target = fallthrough_label,
   };
-  emit_ir_instr(ctx, fallthrough_label_instr);
+  emit_ir_inst(ctx, fallthrough_label_inst);
 
   emit_statement(ctx, stmt->stmt_while.body);
 
   if (!ctx->block_terminated) {
-    IrInstr jump_to_start_instr = {
+    IrInstr jump_to_start_inst = {
       .op = IR_OP_JUMP,
       .target = start_label,
     };
-    emit_ir_instr(ctx, jump_to_start_instr);
+    emit_ir_inst(ctx, jump_to_start_inst);
   }
 
-  IrInstr end_label_instr = {
+  IrInstr end_label_inst = {
     .op = IR_OP_LABEL,
     .target = end_label,
   };
-  emit_ir_instr(ctx, end_label_instr);
+  emit_ir_inst(ctx, end_label_inst);
 
   ctx->current_loop = loop_labels.parent;
 }
@@ -772,7 +773,7 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
 
   Type *return_type = func_decl->symbol->type->function.return_type;
 
-  IrFunction ir_func = {
+  IrFunction new_func = {
     .name = func_decl->name,
     .return_type = get_ir_type(return_type),
     .params = NULL,
@@ -781,8 +782,8 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
     .reg_types = NULL,
   };
 
-  da_append(ir_func.reg_types, IR_TYPE_NONE);
-  da_append(ctx->module->functions, ir_func);
+  da_append(new_func.reg_types, IR_TYPE_NONE);
+  da_append(ctx->module->functions, new_func);
 
   ctx->current_func_idx = da_len(ctx->module->functions) - 1;
   ctx->current_func_sym = func_decl->symbol;
@@ -799,12 +800,12 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
       func->params[i] = next_reg(ctx, sym->type);
 
       if (sym->local.is_address_taken) {
-        IrReg slot = queue_entry_alloc(ctx, sym->type->size);
+        IrReg slot_reg = queue_entry_alloc(ctx, sym->type->size);
 
-        IrInstr spill = {.op = IR_OP_STORE, .arg1 = func->params[i], .arg2 = slot};
-        emit_ir_instr(ctx, spill);
+        IrInstr spill_inst = {.op = IR_OP_STORE, .arg1 = func->params[i], .arg2 = slot_reg};
+        emit_ir_inst(ctx, spill_inst);
 
-        bind_symbol_reg(ctx, sym, slot);
+        bind_symbol_reg(ctx, sym, slot_reg);
       } else {
         bind_symbol_reg(ctx, sym, func->params[i]);
       }
@@ -818,7 +819,7 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
       .op = IR_OP_RETURN,
       .arg1 = NULL_REG,
     };
-    emit_ir_instr(ctx, ret_inst);
+    emit_ir_inst(ctx, ret_inst);
   }
 
   IrFunction *func = get_current_func(ctx);

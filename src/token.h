@@ -9,23 +9,27 @@
   X(TOKEN_ERROR, "ERROR") \
   X(TOKEN_EOF, "EOF")
 
+// Operators, from loosest to tightest binding
 #define TOKENS_OPERATORS(X) \
-  X(TOKEN_PLUS, "+")        \
-  X(TOKEN_MINUS, "-")       \
-  X(TOKEN_STAR, "*")        \
-  X(TOKEN_SLASH, "/")       \
   X(TOKEN_ASSIGN, "=")      \
-  X(TOKEN_BANG, "!")        \
-                            \
-  X(TOKEN_AMP, "&")         \
-  X(TOKEN_DEREF, ".*")      \
                             \
   X(TOKEN_EQ, "==")         \
   X(TOKEN_NOT_EQ, "!=")     \
+                            \
   X(TOKEN_LESS, "<")        \
   X(TOKEN_GREATER, ">")     \
   X(TOKEN_LESS_EQ, "<=")    \
-  X(TOKEN_GREATER_EQ, ">=")
+  X(TOKEN_GREATER_EQ, ">=") \
+                            \
+  X(TOKEN_PLUS, "+")        \
+  X(TOKEN_MINUS, "-")       \
+                            \
+  X(TOKEN_STAR, "*")        \
+  X(TOKEN_SLASH, "/")       \
+                            \
+  X(TOKEN_BANG, "!")        \
+  X(TOKEN_AMP, "&")         \
+  X(TOKEN_DEREF, ".*")
 
 #define TOKENS_SYMBOLS(X) \
   X(TOKEN_LPAREN, "(")    \
@@ -49,16 +53,15 @@
   X(TOKEN_VAR, "var")           \
   X(TOKEN_FN, "fn")             \
                                 \
-  X(TOKEN_RETURN, "return")     \
-  X(TOKEN_BREAK, "break")       \
-  X(TOKEN_CONTINUE, "continue") \
-                                \
   X(TOKEN_IF, "if")             \
   X(TOKEN_ELSE, "else")         \
   X(TOKEN_WHILE, "while")       \
                                 \
-  X(TOKEN_AS, "as")             \
+  X(TOKEN_RETURN, "return")     \
+  X(TOKEN_BREAK, "break")       \
+  X(TOKEN_CONTINUE, "continue") \
                                 \
+  X(TOKEN_AS, "as")             \
   X(TOKEN_NULL, "null")
 
 #define TOKEN_LIST(X) \
@@ -73,7 +76,8 @@ typedef enum {
   TOKEN_LIST(TOKEN_ENUM)
 #undef TOKEN_ENUM
 
-    TOKEN_COUNT,
+  // The number of kinds, used to size tables indexed by TokenKind.
+  TOKEN_COUNT,
 } TokenKind;
 
 typedef struct {
