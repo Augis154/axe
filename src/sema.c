@@ -442,7 +442,7 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return type_error;
     }
 
-    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
       sema_error(
         ctx, expr->loc, "Incompatible types for arithmetic (got '%s' and '%s')", left_type->name, right_type->name);
@@ -464,7 +464,7 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return type_error;
     }
 
-    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
       sema_error(ctx, expr->loc, "Incompatible types for equality: '%s' and '%s'", left_type->name, right_type->name);
       return type_error;
@@ -485,7 +485,7 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return type_error;
     }
 
-    Type *common_type = get_widened_numeric_type(left_type, right_type);
+    Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
       sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
       return type_error;
@@ -891,19 +891,19 @@ void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
 
 // Pass 1: resolves the signature and declares the function globally so it can be called before its definition.
 static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
-  AstDeclFunction *func = &decl->decl_function;
+  AstDeclFunction *func_decl = &decl->decl_function;
 
-  Type *return_type = sema_type(ctx, func->declared_return_type);
+  Type *return_type = sema_type(ctx, func_decl->declared_return_type);
 
-  Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * func->param_count);
-  for (size_t i = 0; i < func->param_count; i++) {
-    param_types[i] = sema_type(ctx, func->params[i].declared_type);
+  Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * func_decl->param_count);
+  for (size_t i = 0; i < func_decl->param_count; i++) {
+    param_types[i] = sema_type(ctx, func_decl->params[i].declared_type);
 
     if (!type_has_storage(param_types[i])) {
       sema_error(ctx,
-                 func->params[i].loc,
+                 func_decl->params[i].loc,
                  "Cannot declare parameter '%s' of type '%s'",
-                 func->params[i].name,
+                 func_decl->params[i].name,
                  param_types[i]->name);
       param_types[i] = type_error;
     }
@@ -917,22 +917,22 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
       {
         .return_type = return_type,
         .param_types = param_types,
-        .param_count = func->param_count,
+        .param_count = func_decl->param_count,
       },
   };
 
-  Symbol *sym = scope_insert(ctx, func->name, SYMBOL_FUNCTION, func_type, decl->loc);
+  Symbol *sym = scope_insert(ctx, func_decl->name, SYMBOL_FUNCTION, func_type, decl->loc);
   if (!sym) {
-    sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", func->name);
+    sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", func_decl->name);
 
-    const char *sym_name = st_intern(&ctx->comp_unit->intern_table, func->name);
+    const char *sym_name = st_intern(&ctx->comp_unit->intern_table, func_decl->name);
     sym = symbol_new(ctx, sym_name, SYMBOL_FUNCTION, func_type, decl->loc);
   }
 
   sym->type = func_type;
-  sym->is_defined = func->body != NULL;
+  sym->is_defined = func_decl->body != NULL;
   sym->function.decl = decl;
-  func->symbol = sym;
+  func_decl->symbol = sym;
 }
 
 static void sema_pass1_decl(SemaContext *ctx, AstDecl *decl) {
@@ -953,16 +953,16 @@ static void sema_pass1_decl(SemaContext *ctx, AstDecl *decl) {
 static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
   assert(decl->decl_function.symbol && "pass 1 declares every function");
 
-  AstDeclFunction *func = &decl->decl_function;
+  AstDeclFunction *func_decl = &decl->decl_function;
   AstDeclFunction *prev_func = ctx->current_function;
 
-  ctx->current_function = func;
+  ctx->current_function = func_decl;
   ctx->current_scope = scope_enter(ctx, ctx->current_scope);
 
-  Type *func_type = func->symbol->type;
+  Type *func_type = func_decl->symbol->type;
 
-  for (uint32_t i = 0; i < func->param_count; i++) {
-    AstParam *param = &func->params[i];
+  for (uint32_t i = 0; i < func_decl->param_count; i++) {
+    AstParam *param = &func_decl->params[i];
     Type *type = func_type->function.param_types[i];
 
     if (sema_reject_type_name(ctx, param->name, param->loc)) {
@@ -973,7 +973,7 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
     Symbol *sym = scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, type, param->loc);
 
     if (!sym) {
-      sema_error(ctx, param->loc, "Redeclaration of parameter '%s' in function '%s'", param->name, func->name);
+      sema_error(ctx, param->loc, "Redeclaration of parameter '%s' in function '%s'", param->name, func_decl->name);
       continue;
     }
 
@@ -982,7 +982,7 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
     param->symbol = sym;
   }
 
-  if (func->body) {
+  if (func_decl->body) {
     sema_stmt(ctx, decl->decl_function.body);
   }
 

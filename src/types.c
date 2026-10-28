@@ -24,22 +24,10 @@ bool type_is_void(Type *type) {
   return type == type_void;
 }
 
-bool type_is_pointer(Type *type) {
+bool type_is_bool(Type *type) {
   if (!type) return false;
-  return type->kind == TYPE_KIND_POINTER;
-}
-
-bool type_has_storage(Type *type) {
-  if (!type) return false;
-  return type == type_error || type->size > 0;
-}
-
-bool type_is_untyped(Type *type) {
-  return type == type_untyped_int || type == type_untyped_float || type == type_untyped_null;
-}
-
-bool type_is_internal(Type *type) {
-  return type == type_error || type_is_untyped(type);
+  if (type == type_error) return true;
+  return type == type_bool;
 }
 
 bool type_is_integer(Type *type) {
@@ -54,28 +42,40 @@ bool type_is_float(Type *type) {
   return type == type_f64 || type == type_f32 || type == type_untyped_float;
 }
 
-bool type_is_bool(Type *type) {
-  if (!type) return false;
-  if (type == type_error) return true;
-  return type == type_bool;
-}
-
 bool type_is_numeric(Type *type) {
   if (!type) return false;
   if (type == type_error) return true;
   return type_is_integer(type) || type_is_float(type);
 }
 
-bool type_is_orderable(Type *type) {
+bool type_is_pointer(Type *type) {
   if (!type) return false;
-  if (type == type_error) return true;
-  return type_is_numeric(type) || type_is_pointer(type);
+  return type->kind == TYPE_KIND_POINTER;
+}
+
+bool type_is_untyped(Type *type) {
+  return type == type_untyped_int || type == type_untyped_float || type == type_untyped_null;
+}
+
+bool type_is_internal(Type *type) {
+  return type == type_error || type_is_untyped(type);
+}
+
+bool type_has_storage(Type *type) {
+  if (!type) return false;
+  return type == type_error || type->size > 0;
 }
 
 bool type_is_comparable(Type *type) {
   if (!type) return false;
   if (type == type_error) return true;
   return type_is_numeric(type) || type_is_bool(type) || type_is_pointer(type) || type == type_untyped_null;
+}
+
+bool type_is_orderable(Type *type) {
+  if (!type) return false;
+  if (type == type_error) return true;
+  return type_is_numeric(type) || type_is_pointer(type);
 }
 
 bool type_equals(Type *a, Type *b) {
@@ -88,29 +88,6 @@ bool type_equals(Type *a, Type *b) {
   }
 
   return false;
-}
-
-Type *type_pointer_to(Arena *arena, Type *base) {
-  size_t name_len = strlen(base->name) + 2;
-  char *name = arena_alloc(arena, name_len);
-  snprintf(name, name_len, "*%s", base->name);
-
-  Type *ptr_type = arena_alloc(arena, sizeof(Type));
-  *ptr_type = (Type){
-    .kind = TYPE_KIND_POINTER,
-    .name = name,
-    .size = 8,
-    .pointer = {.base = base},
-  };
-
-  return ptr_type;
-}
-
-Type *type_default(Type *type) {
-  if (type == type_untyped_int) return type_i32;
-  if (type == type_untyped_float) return type_f64;
-  if (type == type_untyped_null) return type_void_ptr;
-  return type;
 }
 
 // Implicit conversions: every value of `from` is representable in `to`
@@ -147,7 +124,7 @@ bool type_can_widen_to(Type *from, Type *to) {
   return false;
 }
 
-Type *get_widened_numeric_type(Type *a, Type *b) {
+Type *type_common(Type *a, Type *b) {
   if (a == b) return a;
 
   if (type_is_pointer(a) && type_is_pointer(b)) {
@@ -165,4 +142,27 @@ Type *get_widened_numeric_type(Type *a, Type *b) {
   if (type_can_widen_to(b, a)) return a;
 
   return NULL;
+}
+
+Type *type_pointer_to(Arena *arena, Type *base) {
+  size_t name_len = strlen(base->name) + 2;
+  char *name = arena_alloc(arena, name_len);
+  snprintf(name, name_len, "*%s", base->name);
+
+  Type *ptr_type = arena_alloc(arena, sizeof(Type));
+  *ptr_type = (Type){
+    .kind = TYPE_KIND_POINTER,
+    .name = name,
+    .size = 8,
+    .pointer = {.base = base},
+  };
+
+  return ptr_type;
+}
+
+Type *type_default(Type *type) {
+  if (type == type_untyped_int) return type_i32;
+  if (type == type_untyped_float) return type_f64;
+  if (type == type_untyped_null) return type_void_ptr;
+  return type;
 }

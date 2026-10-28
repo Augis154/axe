@@ -112,6 +112,15 @@ static Token error_token(Lexer *lex, const char *message) {
   return token;
 }
 
+static Token match_next(Lexer *lex, char expected, TokenKind if_next, TokenKind otherwise) {
+  if (peek(lex) == expected) {
+    advance(lex);
+    return new_token(lex, if_next);
+  }
+
+  return new_token(lex, otherwise);
+}
+
 static Token number(Lexer *lex) {
   // Hex numbers
   if (lex->token_start[0] == '0' && (peek(lex) == 'x' || peek(lex) == 'X')) {
@@ -200,22 +209,7 @@ Token lexer_get_token(Lexer *lex) {
   char c = advance(lex);
 
   switch (c) {
-  case '.':
-    if (peek(lex) == '*') {
-      advance(lex);
-      return new_token(lex, TOKEN_DEREF);
-    }
-    return new_token(lex, TOKEN_DOT);
-  case ',':
-    return new_token(lex, TOKEN_COMMA);
-  case ':':
-    return new_token(lex, TOKEN_COLON);
-  case ';':
-    return new_token(lex, TOKEN_SEMICOLON);
-
-  case '&':
-    return new_token(lex, TOKEN_AMP);
-
+  // Single-character tokens
   case '(':
     return new_token(lex, TOKEN_LPAREN);
   case ')':
@@ -225,6 +219,13 @@ Token lexer_get_token(Lexer *lex) {
   case '}':
     return new_token(lex, TOKEN_RBRACE);
 
+  case ',':
+    return new_token(lex, TOKEN_COMMA);
+  case ':':
+    return new_token(lex, TOKEN_COLON);
+  case ';':
+    return new_token(lex, TOKEN_SEMICOLON);
+
   case '+':
     return new_token(lex, TOKEN_PLUS);
   case '-':
@@ -233,31 +234,20 @@ Token lexer_get_token(Lexer *lex) {
     return new_token(lex, TOKEN_STAR);
   case '/':
     return new_token(lex, TOKEN_SLASH);
+  case '&':
+    return new_token(lex, TOKEN_AMP);
 
+  // Tokens that lookahead
+  case '.':
+    return match_next(lex, '*', TOKEN_DEREF, TOKEN_DOT);
   case '=':
-    if (peek(lex) == '=') {
-      advance(lex);
-      return new_token(lex, TOKEN_EQ);
-    }
-    return new_token(lex, TOKEN_ASSIGN);
+    return match_next(lex, '=', TOKEN_EQ, TOKEN_ASSIGN);
   case '!':
-    if (peek(lex) == '=') {
-      advance(lex);
-      return new_token(lex, TOKEN_NOT_EQ);
-    }
-    return new_token(lex, TOKEN_BANG);
+    return match_next(lex, '=', TOKEN_NOT_EQ, TOKEN_BANG);
   case '<':
-    if (peek(lex) == '=') {
-      advance(lex);
-      return new_token(lex, TOKEN_LESS_EQ);
-    }
-    return new_token(lex, TOKEN_LESS);
+    return match_next(lex, '=', TOKEN_LESS_EQ, TOKEN_LESS);
   case '>':
-    if (peek(lex) == '=') {
-      advance(lex);
-      return new_token(lex, TOKEN_GREATER_EQ);
-    }
-    return new_token(lex, TOKEN_GREATER);
+    return match_next(lex, '=', TOKEN_GREATER_EQ, TOKEN_GREATER);
 
   default:
     if (is_digit(c)) {

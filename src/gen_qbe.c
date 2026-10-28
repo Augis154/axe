@@ -28,60 +28,60 @@ static char qbe_type_char(IrType type) {
   return 'w';
 }
 
-static inline char reg_type_char(const IrFunction *fn, IrReg reg) {
-  assert(reg.id != NULL_REG.id && reg.id < da_len(fn->reg_types) && "register without a recorded type");
-  return qbe_type_char(fn->reg_types[reg.id]);
+static inline char reg_type_char(const IrFunction *func, IrReg reg) {
+  assert(reg.id != NULL_REG.id && reg.id < da_len(func->reg_types) && "register without a recorded type");
+  return qbe_type_char(func->reg_types[reg.id]);
 }
 
-static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr instr) {
-  switch (instr.op) {
+static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
+  switch (inst.op) {
   case IR_OP_NONE:
     fprintf(file, "\n");
     return;
 
   // Define a register from a constant or another register
   case IR_OP_LOAD_INT: {
-    char type_char = reg_type_char(current_func, instr.res);
-    fprintf(file, "  %%r%u =%c copy %ld\n", instr.res.id, type_char, instr.int_lit);
+    char type_char = reg_type_char(func, inst.res);
+    fprintf(file, "  %%r%u =%c copy %ld\n", inst.res.id, type_char, inst.int_lit);
     return;
   }
 
   case IR_OP_LOAD_FLOAT: {
-    char type_char = reg_type_char(current_func, instr.res);
-    fprintf(file, "  %%r%u =%c copy %c_%.17g\n", instr.res.id, type_char, type_char, instr.float_lit);
+    char type_char = reg_type_char(func, inst.res);
+    fprintf(file, "  %%r%u =%c copy %c_%.17g\n", inst.res.id, type_char, type_char, inst.float_lit);
     return;
   }
 
   case IR_OP_COPY: {
-    char type_char = reg_type_char(current_func, instr.res);
-    fprintf(file, "  %%r%u =%c copy %%r%u\n", instr.res.id, type_char, instr.arg1.id);
+    char type_char = reg_type_char(func, inst.res);
+    fprintf(file, "  %%r%u =%c copy %%r%u\n", inst.res.id, type_char, inst.arg1.id);
     return;
   }
 
     // Memory
   case IR_OP_ALLOC: {
-    int align = instr.int_lit <= 4 ? 4 : 8;
-    fprintf(file, "  %%r%u =l alloc%d %ld\n", instr.res.id, align, instr.int_lit);
+    int align = inst.int_lit <= 4 ? 4 : 8;
+    fprintf(file, "  %%r%u =l alloc%d %ld\n", inst.res.id, align, inst.int_lit);
     return;
   }
   case IR_OP_LOAD: {
-    char type_char = reg_type_char(current_func, instr.res);
-    fprintf(file, "  %%r%u =%c load%c %%r%u\n", instr.res.id, type_char, type_char, instr.arg1.id);
+    char type_char = reg_type_char(func, inst.res);
+    fprintf(file, "  %%r%u =%c load%c %%r%u\n", inst.res.id, type_char, type_char, inst.arg1.id);
     return;
   }
   case IR_OP_STORE: {
-    char type_char = reg_type_char(current_func, instr.arg1);
-    fprintf(file, "  store%c %%r%u, %%r%u\n", type_char, instr.arg1.id, instr.arg2.id);
+    char type_char = reg_type_char(func, inst.arg1);
+    fprintf(file, "  store%c %%r%u, %%r%u\n", type_char, inst.arg1.id, inst.arg2.id);
     return;
   }
 
   // Unary arithmetic and logic
   case IR_OP_NEGATE:
-    fprintf(file, "  %%r%u =%c neg %%r%u\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
+    fprintf(file, "  %%r%u =%c neg %%r%u\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
     return;
 
   case IR_OP_NOT:
-    fprintf(file, "  %%r%u =%c xor %%r%u, 1\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
+    fprintf(file, "  %%r%u =%c xor %%r%u, 1\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
     return;
 
   // Binary arithmetic
@@ -97,11 +97,11 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
     };
     fprintf(file,
             "  %%r%u =%c %s %%r%u, %%r%u\n",
-            instr.res.id,
-            reg_type_char(current_func, instr.res),
-            op_names[instr.op],
-            instr.arg1.id,
-            instr.arg2.id);
+            inst.res.id,
+            reg_type_char(func, inst.res),
+            op_names[inst.op],
+            inst.arg1.id,
+            inst.arg2.id);
     return;
   }
 
@@ -138,104 +138,104 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
       [IR_OP_CMP_GE] = "cge",
     };
 
-    char op_char = reg_type_char(current_func, instr.arg1);
+    char op_char = reg_type_char(func, inst.arg1);
 
     const char *cmp_name = NULL;
-    switch (current_func->reg_types[instr.arg1.id]) {
+    switch (func->reg_types[inst.arg1.id]) {
     case IR_TYPE_I32:
     case IR_TYPE_I64:
-      cmp_name = int_cmp_names[instr.op];
+      cmp_name = int_cmp_names[inst.op];
       break;
     case IR_TYPE_PTR:
-      cmp_name = ptr_cmp_names[instr.op];
+      cmp_name = ptr_cmp_names[inst.op];
       break;
     case IR_TYPE_F32:
     case IR_TYPE_F64:
-      cmp_name = float_cmp_names[instr.op];
+      cmp_name = float_cmp_names[inst.op];
       break;
     case IR_TYPE_NONE:
       UNREACHABLE("comparison of a register without a type");
     }
 
-    fprintf(file, "  %%r%u =w %s%c %%r%u, %%r%u\n", instr.res.id, cmp_name, op_char, instr.arg1.id, instr.arg2.id);
+    fprintf(file, "  %%r%u =w %s%c %%r%u, %%r%u\n", inst.res.id, cmp_name, op_char, inst.arg1.id, inst.arg2.id);
     return;
   }
 
   // Conversions between integer and float
   case IR_OP_ITOF: {
-    char to_char = reg_type_char(current_func, instr.res);
-    char from_char = reg_type_char(current_func, instr.arg1);
+    char to_char = reg_type_char(func, inst.res);
+    char from_char = reg_type_char(func, inst.arg1);
 
-    fprintf(file, "  %%r%u =%c s%ctof %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    fprintf(file, "  %%r%u =%c s%ctof %%r%u\n", inst.res.id, to_char, from_char, inst.arg1.id);
     return;
   }
   case IR_OP_FTOI: {
-    char to_char = reg_type_char(current_func, instr.res);
-    char from_char = reg_type_char(current_func, instr.arg1);
+    char to_char = reg_type_char(func, inst.res);
+    char from_char = reg_type_char(func, inst.arg1);
 
-    fprintf(file, "  %%r%u =%c %ctosi %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    fprintf(file, "  %%r%u =%c %ctosi %%r%u\n", inst.res.id, to_char, from_char, inst.arg1.id);
     return;
   }
 
   // Conversions that change the width of an integer
   case IR_OP_SEXT: {
-    char to_char = reg_type_char(current_func, instr.res);
-    char from_char = reg_type_char(current_func, instr.arg1);
+    char to_char = reg_type_char(func, inst.res);
+    char from_char = reg_type_char(func, inst.arg1);
 
-    fprintf(file, "  %%r%u =%c exts%c %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    fprintf(file, "  %%r%u =%c exts%c %%r%u\n", inst.res.id, to_char, from_char, inst.arg1.id);
     return;
   }
   case IR_OP_ZEXT: {
-    char to_char = reg_type_char(current_func, instr.res);
-    char from_char = reg_type_char(current_func, instr.arg1);
+    char to_char = reg_type_char(func, inst.res);
+    char from_char = reg_type_char(func, inst.arg1);
 
-    fprintf(file, "  %%r%u =%c extu%c %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    fprintf(file, "  %%r%u =%c extu%c %%r%u\n", inst.res.id, to_char, from_char, inst.arg1.id);
     return;
   }
   case IR_OP_TRUNC:
-    fprintf(file, "  %%r%u =%c copy %%r%u\n", instr.res.id, reg_type_char(current_func, instr.res), instr.arg1.id);
+    fprintf(file, "  %%r%u =%c copy %%r%u\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
     return;
 
   // Conversions that change the width of a float
   case IR_OP_FEXT:
-    fprintf(file, "  %%r%u =d exts %%r%u\n", instr.res.id, instr.arg1.id);
+    fprintf(file, "  %%r%u =d exts %%r%u\n", inst.res.id, inst.arg1.id);
     return;
   case IR_OP_FTRUNC:
-    fprintf(file, "  %%r%u =s truncd %%r%u\n", instr.res.id, instr.arg1.id);
+    fprintf(file, "  %%r%u =s truncd %%r%u\n", inst.res.id, inst.arg1.id);
     return;
 
   // Control flow within a function
   case IR_OP_LABEL:
-    fprintf(file, "@l%u\n", instr.target.id);
+    fprintf(file, "@l%u\n", inst.target.id);
     return;
 
   case IR_OP_JUMP:
-    fprintf(file, "  jmp @l%u\n", instr.target.id);
+    fprintf(file, "  jmp @l%u\n", inst.target.id);
     return;
 
   case IR_OP_JZ:
-    fprintf(file, "  jnz %%r%u, @l%u, @l%u\n", instr.arg1.id, instr.target_false.id, instr.target_true.id);
+    fprintf(file, "  jnz %%r%u, @l%u, @l%u\n", inst.arg1.id, inst.target_false.id, inst.target_true.id);
     return;
 
   case IR_OP_JNZ:
-    fprintf(file, "  jnz %%r%u, @l%u, @l%u\n", instr.arg1.id, instr.target_true.id, instr.target_false.id);
+    fprintf(file, "  jnz %%r%u, @l%u, @l%u\n", inst.arg1.id, inst.target_true.id, inst.target_false.id);
     return;
 
   // Calls and returns
   case IR_OP_CALL: {
-    IrType ret_type = current_func->reg_types[instr.res.id];
+    IrType ret_type = func->reg_types[inst.res.id];
 
     if (ret_type == IR_TYPE_NONE) {
-      fprintf(file, "  call $%s(", instr.call.callee);
+      fprintf(file, "  call $%s(", inst.call.callee);
     } else {
-      fprintf(file, "  %%r%u =%c call $%s(", instr.res.id, qbe_type_char(ret_type), instr.call.callee);
+      fprintf(file, "  %%r%u =%c call $%s(", inst.res.id, qbe_type_char(ret_type), inst.call.callee);
     }
 
-    for (size_t i = 0; i < instr.call.arg_count; i++) {
+    for (size_t i = 0; i < inst.call.arg_count; i++) {
       if (i > 0) fprintf(file, ", ");
 
-      IrReg arg = instr.call.args[i];
-      fprintf(file, "%c %%r%u", reg_type_char(current_func, arg), arg.id);
+      IrReg arg_reg = inst.call.args[i];
+      fprintf(file, "%c %%r%u", reg_type_char(func, arg_reg), arg_reg.id);
     }
 
     fprintf(file, ")\n");
@@ -243,10 +243,10 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
   }
 
   case IR_OP_RETURN:
-    if (instr.arg1.id == NULL_REG.id) {
+    if (inst.arg1.id == NULL_REG.id) {
       fprintf(file, "  ret\n");
     } else {
-      fprintf(file, "  ret %%r%u\n", instr.arg1.id);
+      fprintf(file, "  ret %%r%u\n", inst.arg1.id);
     }
     return;
   }
@@ -254,27 +254,27 @@ static void qbe_write_instr(FILE *file, const IrFunction *current_func, IrInstr 
   UNREACHABLE("unhandled IR opcode");
 }
 
-static void qbe_write_function(FILE *file, const IrFunction *function) {
+static void qbe_write_function(FILE *file, const IrFunction *func) {
   fprintf(file, "export function ");
 
-  char return_type_char = qbe_type_char(function->return_type);
+  char return_type_char = qbe_type_char(func->return_type);
   if (return_type_char > 0) {
     fprintf(file, "%c ", return_type_char);
   }
 
-  fprintf(file, "$%s(", function->name);
+  fprintf(file, "$%s(", func->name);
 
-  for (size_t i = 0; i < function->param_count; i++) {
-    IrReg param = function->params[i];
+  for (size_t i = 0; i < func->param_count; i++) {
+    IrReg param_reg = func->params[i];
 
     if (i > 0) fprintf(file, ", ");
-    fprintf(file, "%c %%r%u", reg_type_char(function, param), param.id);
+    fprintf(file, "%c %%r%u", reg_type_char(func, param_reg), param_reg.id);
   }
 
   fprintf(file, ") {\n@start\n");
 
-  for (size_t i = 0; i < da_len(function->buffer); i++) {
-    qbe_write_instr(file, function, function->buffer[i]);
+  for (size_t i = 0; i < da_len(func->buffer); i++) {
+    qbe_write_inst(file, func, func->buffer[i]);
   }
 
   fprintf(file, "}\n");

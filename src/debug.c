@@ -34,84 +34,84 @@ void debug_print_token(Token token) {
   }
 }
 
-void debug_print_ast_sexpr(Arena *arena, AstExpr *node) {
-  if (!node) {
+void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
+  if (!expr) {
     printf("<null expr>\n");
     return;
   }
 
-  switch (node->kind) {
+  switch (expr->kind) {
   case AST_EXPR_LITERAL:
-    switch (node->expr_literal.kind) {
+    switch (expr->expr_literal.kind) {
     case AST_LITERAL_INT:
-      printf("%ld", node->expr_literal.int_value);
+      printf("%ld", expr->expr_literal.int_value);
       return;
     case AST_LITERAL_FLOAT:
-      printf("%f", node->expr_literal.float_value);
+      printf("%f", expr->expr_literal.float_value);
       return;
     case AST_LITERAL_NULL:
       printf("null");
       return;
     case AST_LITERAL_CHAR:
-      printf("'%c'", node->expr_literal.char_value);
+      printf("'%c'", expr->expr_literal.char_value);
       return;
     case AST_LITERAL_STRING:
-      printf("\"%s\"", node->expr_literal.string_value);
+      printf("\"%s\"", expr->expr_literal.string_value);
       return;
     }
     printf("<unknown literal type>");
     return;
 
   case AST_EXPR_IDENTIFIER:
-    printf("%s", node->expr_identifier.name);
+    printf("%s", expr->expr_identifier.name);
     return;
 
   case AST_EXPR_UNARY:
-    printf("(%s ", unop_strings[node->expr_unary.op]);
-    debug_print_ast_sexpr(arena, node->expr_unary.operand);
+    printf("(%s ", unop_strings[expr->expr_unary.op]);
+    debug_print_ast_sexpr(arena, expr->expr_unary.operand);
     printf(")");
     return;
 
   case AST_EXPR_ADDR_OF:
     printf("(& ");
-    debug_print_ast_sexpr(arena, node->expr_addr_of.operand);
+    debug_print_ast_sexpr(arena, expr->expr_addr_of.operand);
     printf(")");
     return;
 
   case AST_EXPR_DEREF:
     printf("(.* ");
-    debug_print_ast_sexpr(arena, node->expr_deref.operand);
+    debug_print_ast_sexpr(arena, expr->expr_deref.operand);
     printf(")");
     return;
 
   case AST_EXPR_BINARY:
-    printf("(%s ", binop_strings[node->expr_binary.op]);
-    debug_print_ast_sexpr(arena, node->expr_binary.left);
+    printf("(%s ", binop_strings[expr->expr_binary.op]);
+    debug_print_ast_sexpr(arena, expr->expr_binary.left);
     printf(" ");
-    debug_print_ast_sexpr(arena, node->expr_binary.right);
+    debug_print_ast_sexpr(arena, expr->expr_binary.right);
     printf(")");
     return;
 
   case AST_EXPR_CAST:
     printf("(cast ");
-    debug_print_ast_sexpr(arena, node->expr_cast.operand);
+    debug_print_ast_sexpr(arena, expr->expr_cast.operand);
     printf(")");
     return;
 
   case AST_EXPR_ASSIGN:
     printf("(= ");
-    debug_print_ast_sexpr(arena, node->expr_assign.target);
+    debug_print_ast_sexpr(arena, expr->expr_assign.target);
     printf(" ");
-    debug_print_ast_sexpr(arena, node->expr_assign.value);
+    debug_print_ast_sexpr(arena, expr->expr_assign.value);
     printf(")");
     return;
 
   case AST_EXPR_CALL:
     printf("(call ");
-    debug_print_ast_sexpr(arena, node->expr_call.callee);
-    for (size_t i = 0; i < node->expr_call.argument_count; i++) {
+    debug_print_ast_sexpr(arena, expr->expr_call.callee);
+    for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
       printf(" ");
-      debug_print_ast_sexpr(arena, node->expr_call.arguments[i]);
+      debug_print_ast_sexpr(arena, expr->expr_call.arguments[i]);
     }
     printf(")");
     return;
@@ -235,9 +235,9 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
   printf("<unknown declaration type>\n");
 }
 
-void debug_print_ir_function(IrFunction *ir_func) {
-  for (size_t i = 0; i < da_len(ir_func->buffer); i++) {
-    IrInstr *inst = &ir_func->buffer[i];
+void debug_print_ir_function(IrFunction *func) {
+  for (size_t i = 0; i < da_len(func->buffer); i++) {
+    IrInstr *inst = &func->buffer[i];
 
     switch (inst->op) {
     case IR_OP_NONE:
