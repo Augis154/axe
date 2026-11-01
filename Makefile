@@ -7,26 +7,26 @@ BUILD_DIR = build
 SRC = $(shell find src -name '*.c' -print)
 OBJ = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
-all: axc
+all: mothc
 
 $(OBJ): $(BUILD_DIR)/%.o: src/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-axc: $(OBJ)
-	gcc $(CFLAGS) $^ -o axc
+mothc: $(OBJ)
+	gcc $(CFLAGS) $^ -o mothc
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 	mkdir -p $(patsubst src/%,$(BUILD_DIR)/%,$(sort $(dir $(SRC))))
 
-.PHONY: all clean compile format
+.PHONY: all clean compile format test
 
 clean:
 	rm -rf $(BUILD_DIR)
 
 compile: all
-	./axc test.axe out.ssa
+	./mothc test.mh out.ssa
 	qbe out.ssa -o out.s
 	gcc out.s -o out
 
