@@ -52,7 +52,11 @@ typedef enum {
 typedef enum {
   AST_LITERAL_INT,
   AST_LITERAL_FLOAT,
+
   AST_LITERAL_NULL,
+  AST_LITERAL_TRUE,
+  AST_LITERAL_FALSE,
+
   AST_LITERAL_CHAR,
   AST_LITERAL_STRING,
 } AstLiteralKind;

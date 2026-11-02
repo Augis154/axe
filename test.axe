@@ -6,9 +6,17 @@ fn fib(n: i32): i32 {
 }
 
 fn main(): i64 {
-  var x: i64 = 3;
-  var p: *i64 = &x;
-  p.* = 7;
+  # var x: i64 = 3;
+  # var p: *i64 = &x;
+  # p.* = 7;
 
-  return fib(x as i32); # 13
+  var a = true;
+  var b = false;
+
+  if a {
+    return 10;
+  }
+
+  return 20;
+  # return fib(x as i32); # 13
 }

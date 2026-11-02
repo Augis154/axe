@@ -276,6 +276,22 @@ static AstExpr *parse_null_literal(Parser *parser) {
   return expr;
 }
 
+// 'true'
+static AstExpr *parse_true_literal(Parser *parser) {
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
+  expr->expr_literal.kind = AST_LITERAL_TRUE;
+
+  return expr;
+}
+
+// 'false'
+static AstExpr *parse_false_literal(Parser *parser) {
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
+  expr->expr_literal.kind = AST_LITERAL_FALSE;
+
+  return expr;
+}
+
 // IDENT
 static AstExpr *parse_identifier(Parser *parser) {
   const char *identifier_name = parse_identifier_name(parser, parser->previous);
@@ -803,7 +819,10 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
   [TOKEN_INT] = {PREC_NONE, parse_int_literal, NULL},
   [TOKEN_FLOAT] = {PREC_NONE, parse_float_literal, NULL},
+
   [TOKEN_NULL] = {PREC_NONE, parse_null_literal, NULL},
+  [TOKEN_TRUE] = {PREC_NONE, parse_true_literal, NULL},
+  [TOKEN_FALSE] = {PREC_NONE, parse_false_literal, NULL},
 
   // Prefix-only operators
   [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
