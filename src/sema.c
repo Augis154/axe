@@ -158,6 +158,8 @@ static const char *describe_expr(const AstExpr *expr) {
   case AST_EXPR_UNARY:
   case AST_EXPR_BINARY:
     return "an operator expression";
+  case AST_EXPR_LOGICAL:
+    return "a logical operator expression";
   case AST_EXPR_ADDR_OF:
     return "an address-of expression";
   case AST_EXPR_DEREF:
@@ -501,6 +503,27 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
     return type_bool;
   }
 
+  case BINOP_BIT_AND:
+  case BINOP_BIT_XOR:
+  case BINOP_BIT_OR: {
+    if (!type_is_integer(left_type) || !type_is_integer(right_type)) {
+      sema_error(ctx, expr->loc, "Bitwise operators require integer operands");
+      return type_error;
+    }
+
+    Type *common_type = type_common(left_type, right_type);
+    if (!common_type) {
+      sema_error(
+        ctx, expr->loc, "Incompatible types for bitwise operation: '%s' and '%s'", left_type->name, right_type->name);
+      return type_error;
+    }
+
+    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
+    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
+
+    return common_type;
+  }
+
   case BINOP_COUNT:
     sema_error(ctx, expr->loc, "Invalid binary operator");
     return type_error;
@@ -508,6 +531,22 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
 
   sema_error(ctx, expr->loc, "Unknown binary operator");
   return type_error;
+}
+
+static Type *sema_expr_logical(SemaContext *ctx, AstExpr *expr) {
+  Type *left_type = sema_expr(ctx, expr->expr_logical.left);
+  Type *right_type = sema_expr(ctx, expr->expr_logical.right);
+
+  if (left_type == type_error || right_type == type_error) {
+    return type_error;
+  }
+
+  if (!type_is_bool(left_type) || !type_is_bool(right_type)) {
+    sema_error(ctx, expr->loc, "Logical operators require 'bool' operands");
+    return type_error;
+  }
+
+  return type_bool;
 }
 
 // Types a cast node. Implicit casts are created by sema_coerce() with their type already set.
@@ -710,6 +749,10 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_BINARY:
     result_type = sema_expr_binary(ctx, expr);
+    break;
+
+  case AST_EXPR_LOGICAL:
+    result_type = sema_expr_logical(ctx, expr);
     break;
 
   case AST_EXPR_CAST:

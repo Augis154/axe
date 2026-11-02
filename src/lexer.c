@@ -234,12 +234,16 @@ Token lexer_get_token(Lexer *lex) {
     return new_token(lex, TOKEN_STAR);
   case '/':
     return new_token(lex, TOKEN_SLASH);
-  case '&':
-    return new_token(lex, TOKEN_AMP);
+  case '^':
+    return new_token(lex, TOKEN_BIT_XOR);
 
   // Tokens that lookahead
   case '.':
     return match_next(lex, '*', TOKEN_DEREF, TOKEN_DOT);
+  case '|':
+    return match_next(lex, '|', TOKEN_OR, TOKEN_BIT_OR);
+  case '&':
+    return match_next(lex, '&', TOKEN_AND, TOKEN_BIT_AND);
   case '=':
     return match_next(lex, '=', TOKEN_EQ, TOKEN_ASSIGN);
   case '!':

@@ -215,6 +215,13 @@ static IrOp get_binary_ir_op(BinaryOp op) {
   case BINOP_GREATER_EQ:
     return IR_OP_CMP_GE;
 
+  case BINOP_BIT_AND:
+    return IR_OP_BIT_AND;
+  case BINOP_BIT_XOR:
+    return IR_OP_BIT_XOR;
+  case BINOP_BIT_OR:
+    return IR_OP_BIT_OR;
+
   case BINOP_COUNT:
     UNREACHABLE("BINOP_COUNT is not a valid operator");
   }
@@ -485,6 +492,74 @@ static IrReg emit_binary_op(IrGenContext *ctx, AstExpr *expr) {
   return res;
 }
 
+static IrReg emit_logical_op(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_logical_op: expr is NULL");
+
+  LogicalOp op = expr->expr_logical.op;
+
+  IrLabel right_label = next_label(ctx);
+  IrLabel end_label = next_label(ctx);
+  IrReg res = next_reg(ctx, expr_type(ctx, expr));
+
+  IrReg left_reg = emit_expression(ctx, expr->expr_logical.left);
+
+  IrInstr left_copy_inst = {
+    .op = IR_OP_COPY,
+    .res = res,
+    .arg1 = left_reg,
+  };
+  emit_ir_inst(ctx, left_copy_inst);
+
+  switch (op) {
+  case LOGIC_AND: {
+    IrInstr jump_inst = {
+      .op = IR_OP_JNZ,
+      .arg1 = res,
+      .target_true = right_label,
+      .target_false = end_label,
+    };
+    emit_ir_inst(ctx, jump_inst);
+    break;
+  }
+  case LOGIC_OR: {
+    IrInstr jump_inst = {
+      .op = IR_OP_JZ,
+      .arg1 = res,
+      .target_true = right_label,
+      .target_false = end_label,
+    };
+    emit_ir_inst(ctx, jump_inst);
+    break;
+  }
+
+  default:
+    UNREACHABLE("unhandled logical operator");
+  }
+
+  IrInstr right_label_inst = {
+    .op = IR_OP_LABEL,
+    .target = right_label,
+  };
+  emit_ir_inst(ctx, right_label_inst);
+
+  IrReg right_reg = emit_expression(ctx, expr->expr_logical.right);
+
+  IrInstr right_copy_inst = {
+    .op = IR_OP_COPY,
+    .res = res,
+    .arg1 = right_reg,
+  };
+  emit_ir_inst(ctx, right_copy_inst);
+
+  IrInstr end_label_inst = {
+    .op = IR_OP_LABEL,
+    .target = end_label,
+  };
+  emit_ir_inst(ctx, end_label_inst);
+
+  return res;
+}
+
 static IrReg emit_cast(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_cast: expr is NULL");
 
@@ -517,6 +592,9 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_BINARY:
     return emit_binary_op(ctx, expr);
+
+  case AST_EXPR_LOGICAL:
+    return emit_logical_op(ctx, expr);
 
   case AST_EXPR_CAST:
     return emit_cast(ctx, expr);

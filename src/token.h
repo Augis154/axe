@@ -13,6 +13,9 @@
 #define TOKENS_OPERATORS(X) \
   X(TOKEN_ASSIGN, "=")      \
                             \
+  X(TOKEN_OR, "||")         \
+  X(TOKEN_AND, "&&")        \
+                            \
   X(TOKEN_EQ, "==")         \
   X(TOKEN_NOT_EQ, "!=")     \
                             \
@@ -20,6 +23,10 @@
   X(TOKEN_GREATER, ">")     \
   X(TOKEN_LESS_EQ, "<=")    \
   X(TOKEN_GREATER_EQ, ">=") \
+                            \
+  X(TOKEN_BIT_AND, "&")     \
+  X(TOKEN_BIT_XOR, "^")     \
+  X(TOKEN_BIT_OR, "|")      \
                             \
   X(TOKEN_PLUS, "+")        \
   X(TOKEN_MINUS, "-")       \

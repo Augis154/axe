@@ -7,6 +7,7 @@
 static const char *token_strings[TOKEN_COUNT];
 static const char *unop_strings[UNOP_COUNT];
 static const char *binop_strings[BINOP_COUNT];
+static const char *logicop_strings[LOGIC_COUNT];
 
 static void print_indent(int indent) {
   printf("%*s", indent * 2, "");
@@ -95,6 +96,14 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     debug_print_ast_sexpr(arena, expr->expr_binary.left);
     printf(" ");
     debug_print_ast_sexpr(arena, expr->expr_binary.right);
+    printf(")");
+    return;
+
+  case AST_EXPR_LOGICAL:
+    printf("(%s ", logicop_strings[expr->expr_logical.op]);
+    debug_print_ast_sexpr(arena, expr->expr_logical.left);
+    printf(" ");
+    debug_print_ast_sexpr(arena, expr->expr_logical.right);
     printf(")");
     return;
 
@@ -316,6 +325,17 @@ void debug_print_ir_function(IrFunction *func) {
       printf("%zu: r%u = r%u >= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
 
+    // Bitwise operations
+    case IR_OP_BIT_AND:
+      printf("%zu: r%u = r%u & r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      continue;
+    case IR_OP_BIT_XOR:
+      printf("%zu: r%u = r%u ^ r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      continue;
+    case IR_OP_BIT_OR:
+      printf("%zu: r%u = r%u | r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      continue;
+
     // Conversions between integer and float
     case IR_OP_ITOF:
       printf("%zu: r%u = ITOF r%u\n", i, inst->res.id, inst->arg1.id);
@@ -406,4 +426,13 @@ static const char *binop_strings[BINOP_COUNT] = {
   [BINOP_GREATER] = ">",
   [BINOP_LESS_EQ] = "<=",
   [BINOP_GREATER_EQ] = ">=",
+
+  [BINOP_BIT_AND] = "&",
+  [BINOP_BIT_XOR] = "^",
+  [BINOP_BIT_OR] = "|",
+};
+
+static const char *logicop_strings[LOGIC_COUNT] = {
+  [LOGIC_AND] = "&&",
+  [LOGIC_OR] = "||",
 };

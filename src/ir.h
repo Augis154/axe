@@ -36,6 +36,11 @@ typedef enum {
   IR_OP_CMP_LE,
   IR_OP_CMP_GE,
 
+  // Bitwise operations
+  IR_OP_BIT_AND,
+  IR_OP_BIT_XOR,
+  IR_OP_BIT_OR,
+
   // Conversions between integer and float
   IR_OP_ITOF,
   IR_OP_FTOI,
