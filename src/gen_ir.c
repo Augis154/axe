@@ -231,6 +231,8 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
   case AST_LITERAL_INT:
   case AST_LITERAL_FLOAT:
   case AST_LITERAL_NULL:
+  case AST_LITERAL_TRUE:
+  case AST_LITERAL_FALSE:
     break;
   case AST_LITERAL_CHAR:
     UNREACHABLE("sema rejects char literals");
@@ -248,7 +250,21 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
     inst.float_lit = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
   } else {
     inst.op = IR_OP_LOAD_INT;
-    inst.int_lit = literal->kind == AST_LITERAL_NULL ? 0 : literal->int_value;
+
+    switch (literal->kind) {
+    case AST_LITERAL_TRUE:
+    case AST_LITERAL_FALSE:
+      inst.int_lit = literal->kind == AST_LITERAL_TRUE ? 1 : 0;
+      break;
+    case AST_LITERAL_NULL:
+      inst.int_lit = 0;
+      break;
+    case AST_LITERAL_INT:
+      inst.int_lit = literal->int_value;
+      break;
+    default:
+      UNREACHABLE("sema rejects non-numeric literals");
+    }
   }
 
   emit_ir_inst(ctx, inst);

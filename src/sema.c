@@ -261,6 +261,10 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
   case AST_LITERAL_NULL:
     return type_untyped_null;
 
+  case AST_LITERAL_TRUE:
+  case AST_LITERAL_FALSE:
+    return type_bool;
+
   case AST_LITERAL_CHAR:
   case AST_LITERAL_STRING:
     sema_error(ctx, expr->loc, "Literal type not yet supported in semantic analysis");
