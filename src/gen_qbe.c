@@ -161,6 +161,25 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
     return;
   }
 
+  // Binary bitwise operations
+  case IR_OP_BIT_AND:
+  case IR_OP_BIT_XOR:
+  case IR_OP_BIT_OR: {
+    static const char *op_names[] = {
+      [IR_OP_BIT_AND] = "and",
+      [IR_OP_BIT_XOR] = "xor",
+      [IR_OP_BIT_OR] = "or",
+    };
+    fprintf(file,
+            "  %%r%u =%c %s %%r%u, %%r%u\n",
+            inst.res.id,
+            reg_type_char(func, inst.res),
+            op_names[inst.op],
+            inst.arg1.id,
+            inst.arg2.id);
+    return;
+  }
+
   // Conversions between integer and float
   case IR_OP_ITOF: {
     char to_char = reg_type_char(func, inst.res);

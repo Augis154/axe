@@ -28,8 +28,19 @@ typedef enum {
   BINOP_LESS_EQ,
   BINOP_GREATER_EQ,
 
+  BINOP_BIT_AND,
+  BINOP_BIT_XOR,
+  BINOP_BIT_OR,
+
   BINOP_COUNT,
 } BinaryOp;
+
+typedef enum {
+  LOGIC_AND,
+  LOGIC_OR,
+
+  LOGIC_COUNT,
+} LogicalOp;
 
 // Expression nodes
 
@@ -43,6 +54,7 @@ typedef enum {
   AST_EXPR_ADDR_OF,
   AST_EXPR_DEREF,
   AST_EXPR_BINARY,
+  AST_EXPR_LOGICAL,
   AST_EXPR_CAST,
 
   AST_EXPR_ASSIGN,
@@ -96,6 +108,12 @@ typedef struct {
 } AstExprBinary;
 
 typedef struct {
+  LogicalOp op;
+  AstExpr *left;
+  AstExpr *right;
+} AstExprLogical;
+
+typedef struct {
   AstExpr *operand;
   AstType *target;
   bool implicit;
@@ -125,6 +143,7 @@ struct AstExpr_ {
     AstExprAddrOf expr_addr_of;
     AstExprDeref expr_deref;
     AstExprBinary expr_binary;
+    AstExprLogical expr_logical;
     AstExprCast expr_cast;
 
     AstExprAssign expr_assign;

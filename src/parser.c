@@ -12,8 +12,13 @@
 typedef enum {
   PREC_NONE = 0,
   PREC_ASSIGNMENT, // =
+  PREC_LOGIC_OR,   // ||
+  PREC_LOGIC_AND,  // &&
   PREC_EQUALITY,   // == !=
   PREC_COMPARISON, // < > <= >=
+  PREC_BIT_AND,    // &
+  PREC_BIT_XOR,    // ^
+  PREC_BIT_OR,     // |
   PREC_TERM,       // + -
   PREC_FACTOR,     // * /
   PREC_CAST,       // as
@@ -202,8 +207,28 @@ static BinaryOp get_binary_op(TokenKind kind) {
   case TOKEN_GREATER_EQ:
     return BINOP_GREATER_EQ;
 
+  case TOKEN_BIT_AND:
+    return BINOP_BIT_AND;
+  case TOKEN_BIT_XOR:
+    return BINOP_BIT_XOR;
+  case TOKEN_BIT_OR:
+    return BINOP_BIT_OR;
+
   default:
     error_at(NULL, (Token){.kind = kind}, "Invalid binary operator.");
+    return -1;
+  }
+}
+
+static LogicalOp get_logical_op(TokenKind kind) {
+  switch (kind) {
+  case TOKEN_AND:
+    return LOGIC_AND;
+  case TOKEN_OR:
+    return LOGIC_OR;
+
+  default:
+    error_at(NULL, (Token){.kind = kind}, "Invalid logical operator.");
     return -1;
   }
 }
@@ -363,6 +388,22 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
   binary_expr->expr_binary.right = right;
 
   return binary_expr;
+}
+
+static AstExpr *parse_logical(Parser *parser, AstExpr *left) {
+  SourceLoc start_loc = parser->previous.loc;
+  TokenKind operator = parser->previous.kind;
+
+  const ParseRule *rule = get_rule(operator);
+  AstExpr *right = parse_precedence(parser, rule->precedence + 1);
+  if (!left || !right) return NULL;
+
+  AstExpr *logical_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LOGICAL, start_loc);
+  logical_expr->expr_logical.op = get_logical_op(operator);
+  logical_expr->expr_logical.left = left;
+  logical_expr->expr_logical.right = right;
+
+  return logical_expr;
 }
 
 // expression 'as' type  -- the 'as' is already consumed.
@@ -831,6 +872,10 @@ static const ParseRule rules[TOKEN_COUNT] = {
   // Assignment
   [TOKEN_ASSIGN] = {PREC_ASSIGNMENT, NULL, parse_assignment},
 
+  // Logical
+  [TOKEN_OR] = {PREC_LOGIC_OR, NULL, parse_logical},
+  [TOKEN_AND] = {PREC_LOGIC_AND, NULL, parse_logical},
+
   // Equality
   [TOKEN_EQ] = {PREC_EQUALITY, NULL, parse_binary},
   [TOKEN_NOT_EQ] = {PREC_EQUALITY, NULL, parse_binary},
@@ -840,6 +885,11 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_GREATER] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_LESS_EQ] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_GREATER_EQ] = {PREC_COMPARISON, NULL, parse_binary},
+
+  // Bitwise
+  [TOKEN_BIT_AND] = {PREC_BIT_AND, NULL, parse_binary},
+  [TOKEN_BIT_XOR] = {PREC_BIT_XOR, NULL, parse_binary},
+  [TOKEN_BIT_OR] = {PREC_BIT_OR, NULL, parse_binary},
 
   // Additive; '-' is also the prefix negation
   [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},
