@@ -50,18 +50,23 @@ typedef enum {
 typedef enum {
   AST_EXPR_INVALID,
 
+  // Leaves
   AST_EXPR_LITERAL,
   AST_EXPR_IDENTIFIER,
 
-  AST_EXPR_UNARY,
+  // Access: address-of, dereference and call
   AST_EXPR_ADDR_OF,
   AST_EXPR_DEREF,
+  AST_EXPR_CALL,
+
+  // Operators
+  AST_EXPR_UNARY,
   AST_EXPR_BINARY,
   AST_EXPR_LOGICAL,
   AST_EXPR_CAST,
 
+  // Mutation
   AST_EXPR_ASSIGN,
-  AST_EXPR_CALL,
 } AstExprKind;
 
 typedef enum {
@@ -92,17 +97,23 @@ typedef struct {
 } AstExprIdentifier;
 
 typedef struct {
-  UnaryOp op;
-  AstExpr *operand;
-} AstExprUnary;
-
-typedef struct {
   AstExpr *operand;
 } AstExprAddrOf;
 
 typedef struct {
   AstExpr *operand;
 } AstExprDeref;
+
+typedef struct {
+  AstExpr *callee;
+  AstExpr **arguments;
+  size_t argument_count;
+} AstExprCall;
+
+typedef struct {
+  UnaryOp op;
+  AstExpr *operand;
+} AstExprUnary;
 
 typedef struct {
   BinaryOp op;
@@ -127,12 +138,6 @@ typedef struct {
   AstExpr *value;
 } AstExprAssign;
 
-typedef struct {
-  AstExpr *callee;
-  AstExpr **arguments;
-  size_t argument_count;
-} AstExprCall;
-
 struct AstExpr_ {
   AstExprKind kind;
   uint32_t id;
@@ -142,15 +147,16 @@ struct AstExpr_ {
     AstExprLiteral expr_literal;
     AstExprIdentifier expr_identifier;
 
-    AstExprUnary expr_unary;
     AstExprAddrOf expr_addr_of;
     AstExprDeref expr_deref;
+    AstExprCall expr_call;
+
+    AstExprUnary expr_unary;
     AstExprBinary expr_binary;
     AstExprLogical expr_logical;
     AstExprCast expr_cast;
 
     AstExprAssign expr_assign;
-    AstExprCall expr_call;
   };
 };
 

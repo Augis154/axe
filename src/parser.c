@@ -344,21 +344,6 @@ static AstExpr *parse_grouping(Parser *parser) {
   return expr;
 }
 
-// ( '-' | '!' ) expression
-static AstExpr *parse_unary(Parser *parser) {
-  SourceLoc start_loc = parser->previous.loc;
-  TokenKind operator = parser->previous.kind;
-
-  AstExpr *op_expr = parse_precedence(parser, PREC_PREFIX);
-  if (!op_expr) return NULL;
-
-  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_UNARY, start_loc);
-  unary_expr->expr_unary.op = get_unary_op(operator);
-  unary_expr->expr_unary.operand = op_expr;
-
-  return unary_expr;
-}
-
 static AstExpr *parse_addr_of(Parser *parser) {
   SourceLoc start_loc = parser->previous.loc;
 
@@ -378,6 +363,52 @@ static AstExpr *parse_deref(Parser *parser, AstExpr *left) {
   deref_expr->expr_deref.operand = left;
 
   return deref_expr;
+}
+
+// callee '(' [ expression { ',' expression } [ ',' ] ] ')'  -- the '(' is already consumed.
+static AstExpr *parse_call(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+
+  AstExpr **args = NULL;
+  while (!check(parser, TOKEN_RPAREN) && !check(parser, TOKEN_EOF)) {
+    AstExpr *arg = parse_expression(parser);
+    if (arg) {
+      da_append(args, arg);
+    }
+
+    if (!match(parser, TOKEN_COMMA)) {
+      break;
+    }
+  }
+
+  consume(parser, TOKEN_RPAREN, "Expected ')' after function arguments.");
+
+  AstExpr *call_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_CALL, left->loc);
+  call_expr->expr_call.callee = left;
+
+  AstExpr **arg_array = arena_copy_array(&parser->comp_unit->arena, args, da_len(args), sizeof(AstExpr *));
+
+  call_expr->expr_call.arguments = arg_array;
+  call_expr->expr_call.argument_count = da_len(args);
+
+  da_free(args);
+
+  return call_expr;
+}
+
+// ( '-' | '!' ) expression
+static AstExpr *parse_unary(Parser *parser) {
+  SourceLoc start_loc = parser->previous.loc;
+  TokenKind operator = parser->previous.kind;
+
+  AstExpr *op_expr = parse_precedence(parser, PREC_PREFIX);
+  if (!op_expr) return NULL;
+
+  AstExpr *unary_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_UNARY, start_loc);
+  unary_expr->expr_unary.op = get_unary_op(operator);
+  unary_expr->expr_unary.operand = op_expr;
+
+  return unary_expr;
 }
 
 // left ( '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '>' | '<=' | '>=' ) right  -- left-associative.
@@ -445,37 +476,6 @@ static AstExpr *parse_assignment(Parser *parser, AstExpr *left) {
   assign_expr->expr_assign.value = right;
 
   return assign_expr;
-}
-
-// callee '(' [ expression { ',' expression } [ ',' ] ] ')'  -- the '(' is already consumed.
-static AstExpr *parse_call(Parser *parser, AstExpr *left) {
-  if (!left) return NULL;
-
-  AstExpr **args = NULL;
-  while (!check(parser, TOKEN_RPAREN) && !check(parser, TOKEN_EOF)) {
-    AstExpr *arg = parse_expression(parser);
-    if (arg) {
-      da_append(args, arg);
-    }
-
-    if (!match(parser, TOKEN_COMMA)) {
-      break;
-    }
-  }
-
-  consume(parser, TOKEN_RPAREN, "Expected ')' after function arguments.");
-
-  AstExpr *call_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_CALL, left->loc);
-  call_expr->expr_call.callee = left;
-
-  AstExpr **arg_array = arena_copy_array(&parser->comp_unit->arena, args, da_len(args), sizeof(AstExpr *));
-
-  call_expr->expr_call.arguments = arg_array;
-  call_expr->expr_call.argument_count = da_len(args);
-
-  da_free(args);
-
-  return call_expr;
 }
 
 // Statement parsing functions

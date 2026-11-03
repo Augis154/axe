@@ -155,21 +155,25 @@ static const char *describe_expr(const AstExpr *expr) {
     return "a literal";
   case AST_EXPR_IDENTIFIER:
     return "a name";
+
+  case AST_EXPR_ADDR_OF:
+    return "an address-of expression";
+  case AST_EXPR_DEREF:
+    return "a dereference";
+  case AST_EXPR_CALL:
+    return "a function call result";
+
   case AST_EXPR_UNARY:
   case AST_EXPR_BINARY:
     return "an operator expression";
   case AST_EXPR_LOGICAL:
     return "a logical operator expression";
-  case AST_EXPR_ADDR_OF:
-    return "an address-of expression";
-  case AST_EXPR_DEREF:
-    return "a dereference";
   case AST_EXPR_CAST:
     return "a cast";
+
   case AST_EXPR_ASSIGN:
     return "an assignment";
-  case AST_EXPR_CALL:
-    return "a function call result";
+
   case AST_EXPR_INVALID:
     return "an invalid expression";
   }
@@ -302,47 +306,6 @@ static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   return sym->type;
 }
 
-static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
-  Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
-
-  if (operand_type == type_error) {
-    return type_error;
-  }
-
-  switch (expr->expr_unary.op) {
-  case UNOP_NEGATE:
-    if (!type_is_numeric(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '-' operator requires numeric type");
-      return type_error;
-    }
-
-    return operand_type;
-
-  case UNOP_NOT:
-    if (!type_is_bool(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
-      return type_error;
-    }
-
-    return operand_type;
-
-  case UNOP_BIT_NOT:
-    if (!type_is_integer(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '~' operator requires integer type");
-      return type_error;
-    }
-
-    return operand_type;
-
-  case UNOP_COUNT:
-    sema_error(ctx, expr->loc, "Invalid unary operator");
-    return type_error;
-  }
-
-  sema_error(ctx, expr->loc, "Unknown unary operator");
-  return type_error;
-}
-
 static Type *sema_expr_addr_of(SemaContext *ctx, AstExpr *expr) {
   AstExpr *operand = expr->expr_addr_of.operand;
   Type *operand_type = sema_expr(ctx, operand);
@@ -384,6 +347,121 @@ static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
   }
 
   return operand_type->pointer.base;
+}
+
+// Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
+static void sema_call_arguments(SemaContext *ctx, AstExpr *expr) {
+  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+    sema_expr(ctx, expr->expr_call.arguments[i]);
+  }
+}
+
+static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
+  AstExpr *callee = expr->expr_call.callee;
+
+  if (callee->kind != AST_EXPR_IDENTIFIER) {
+    sema_error(ctx, expr->loc, "Function calls must be made to identifiers");
+    sema_call_arguments(ctx, expr);
+    return type_error;
+  }
+
+  Symbol *sym = scope_lookup(ctx, callee->expr_identifier.name);
+
+  if (!sym) {
+    sema_error(ctx, expr->loc, "Undefined function '%s'", callee->expr_identifier.name);
+    sema_call_arguments(ctx, expr);
+    return type_error;
+  }
+
+  if (sym->kind != SYMBOL_FUNCTION) {
+    sema_error(ctx, expr->loc, "Expected function, got %s", callee->expr_identifier.name);
+    sema_call_arguments(ctx, expr);
+    return type_error;
+  }
+
+  TypeFunction *func_type = &sym->type->function;
+
+  if (expr->expr_call.argument_count != func_type->param_count) {
+    sema_error(ctx,
+               expr->loc,
+               "Function '%s' expects %zu arguments, but %zu were provided",
+               callee->expr_identifier.name,
+               sym->type->function.param_count,
+               expr->expr_call.argument_count);
+    sema_call_arguments(ctx, expr);
+    return type_error;
+  }
+
+  bool arguments_ok = true;
+
+  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+    AstExpr *arg_expr = expr->expr_call.arguments[i];
+    Type *arg_type = sema_expr(ctx, arg_expr);
+
+    if (arg_type == type_error) {
+      arguments_ok = false;
+      continue;
+    }
+
+    Type *expected_type = func_type->param_types[i];
+
+    if (!type_can_widen_to(arg_type, expected_type)) {
+      sema_error(ctx,
+                 arg_expr->loc,
+                 "Argument %zu of function '%s' expects type '%s', but got '%s'",
+                 i + 1,
+                 callee->expr_identifier.name,
+                 expected_type->name,
+                 arg_type->name);
+      arguments_ok = false;
+      continue;
+    }
+
+    sema_coerce(ctx, &expr->expr_call.arguments[i], expected_type);
+  }
+
+  return arguments_ok ? func_type->return_type : type_error;
+}
+
+static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
+  Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
+
+  if (operand_type == type_error) {
+    return type_error;
+  }
+
+  switch (expr->expr_unary.op) {
+  case UNOP_NEGATE:
+    if (!type_is_numeric(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '-' operator requires numeric type");
+      return type_error;
+    }
+
+    return operand_type;
+
+  case UNOP_NOT:
+    if (!type_is_bool(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
+      return type_error;
+    }
+
+    return operand_type;
+
+  case UNOP_BIT_NOT:
+    if (!type_is_integer(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '~' operator requires integer type");
+      return type_error;
+    }
+
+    return operand_type;
+
+  case UNOP_COUNT:
+    sema_error(ctx, expr->loc, "Invalid unary operator");
+    return type_error;
+  }
+
+  sema_error(ctx, expr->loc, "Unknown unary operator");
+  return type_error;
 }
 
 // Types `ptr + int`, `int + ptr`, `ptr - int` (the pointer type) and `ptr - ptr` (i64, counted in elements).
@@ -667,80 +745,6 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   return target_type;
 }
 
-// Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
-static void sema_call_arguments(SemaContext *ctx, AstExpr *expr) {
-  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
-    sema_expr(ctx, expr->expr_call.arguments[i]);
-  }
-}
-
-static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
-  AstExpr *callee = expr->expr_call.callee;
-
-  if (callee->kind != AST_EXPR_IDENTIFIER) {
-    sema_error(ctx, expr->loc, "Function calls must be made to identifiers");
-    sema_call_arguments(ctx, expr);
-    return type_error;
-  }
-
-  Symbol *sym = scope_lookup(ctx, callee->expr_identifier.name);
-
-  if (!sym) {
-    sema_error(ctx, expr->loc, "Undefined function '%s'", callee->expr_identifier.name);
-    sema_call_arguments(ctx, expr);
-    return type_error;
-  }
-
-  if (sym->kind != SYMBOL_FUNCTION) {
-    sema_error(ctx, expr->loc, "Expected function, got %s", callee->expr_identifier.name);
-    sema_call_arguments(ctx, expr);
-    return type_error;
-  }
-
-  TypeFunction *func_type = &sym->type->function;
-
-  if (expr->expr_call.argument_count != func_type->param_count) {
-    sema_error(ctx,
-               expr->loc,
-               "Function '%s' expects %zu arguments, but %zu were provided",
-               callee->expr_identifier.name,
-               sym->type->function.param_count,
-               expr->expr_call.argument_count);
-    sema_call_arguments(ctx, expr);
-    return type_error;
-  }
-
-  bool arguments_ok = true;
-
-  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
-    AstExpr *arg_expr = expr->expr_call.arguments[i];
-    Type *arg_type = sema_expr(ctx, arg_expr);
-
-    if (arg_type == type_error) {
-      arguments_ok = false;
-      continue;
-    }
-
-    Type *expected_type = func_type->param_types[i];
-
-    if (!type_can_widen_to(arg_type, expected_type)) {
-      sema_error(ctx,
-                 arg_expr->loc,
-                 "Argument %zu of function '%s' expects type '%s', but got '%s'",
-                 i + 1,
-                 callee->expr_identifier.name,
-                 expected_type->name,
-                 arg_type->name);
-      arguments_ok = false;
-      continue;
-    }
-
-    sema_coerce(ctx, &expr->expr_call.arguments[i], expected_type);
-  }
-
-  return arguments_ok ? func_type->return_type : type_error;
-}
-
 Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
   assert(expr && "sema_expr called without an expression");
 
@@ -755,16 +759,20 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
     result_type = sema_expr_identifier(ctx, expr);
     break;
 
-  case AST_EXPR_UNARY:
-    result_type = sema_expr_unary(ctx, expr);
-    break;
-
   case AST_EXPR_ADDR_OF:
     result_type = sema_expr_addr_of(ctx, expr);
     break;
 
   case AST_EXPR_DEREF:
     result_type = sema_expr_deref(ctx, expr);
+    break;
+
+  case AST_EXPR_CALL:
+    result_type = sema_expr_call(ctx, expr);
+    break;
+
+  case AST_EXPR_UNARY:
+    result_type = sema_expr_unary(ctx, expr);
     break;
 
   case AST_EXPR_BINARY:
@@ -781,10 +789,6 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_ASSIGN:
     result_type = sema_expr_assignment(ctx, expr);
-    break;
-
-  case AST_EXPR_CALL:
-    result_type = sema_expr_call(ctx, expr);
     break;
 
   case AST_EXPR_INVALID:
