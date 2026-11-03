@@ -6,14 +6,10 @@ fn fib(n: i32): i32 {
 }
 
 fn main(): i64 {
-  var x: i64 = 0b101;
-  var y = x ^ 0b011;
+  var xs: [5]i64;
 
-  var a = true;
+  xs[0] = 1;
+  xs[2] = 7;
 
-  if a || false {
-    x = y | 1;
-  }
-
-  return fib(x as i32); # 13
+  return fib(xs[2] as i32); # 13
 }

@@ -28,13 +28,19 @@ typedef enum {
 #undef TYPE_ENUM
 
   // Kinds built from other types
-  TYPE_KIND_FUNCTION,
   TYPE_KIND_POINTER,
+  TYPE_KIND_ARRAY,
+  TYPE_KIND_FUNCTION,
 } TypeKind;
 
 typedef struct {
   Type *base;
 } TypePointer;
+
+typedef struct {
+  Type *element;
+  size_t count;
+} TypeArray;
 
 typedef struct {
   Type *return_type;
@@ -51,6 +57,7 @@ struct Type_ {
 
   union {
     TypePointer pointer;
+    TypeArray array;
     TypeFunction function;
   };
 };
@@ -68,6 +75,9 @@ bool type_is_integer(Type *type);
 bool type_is_float(Type *type);
 bool type_is_numeric(Type *type);
 bool type_is_pointer(Type *type);
+bool type_is_array(Type *type);
+// Values that are handled by the address of their storage instead of being loaded into a register
+bool type_is_aggregate(Type *type);
 
 // Compiler-internal types
 bool type_is_untyped(Type *type);
@@ -81,14 +91,19 @@ bool type_is_comparable(Type *type);
 bool type_is_orderable(Type *type);
 
 // Relations between types
+// Same type; pointers and arrays are compared by their element types (and count)
 bool type_equals(Type *a, Type *b);
+// Whether a value of `from` converts implicitly to `to`
 bool type_can_widen_to(Type *from, Type *to);
+// The type both operands convert to, or NULL when they have none
 Type *type_common(Type *a, Type *b);
 
 // Building and deriving types
-
 // Builds the type `*base`
 Type *type_pointer_to(Arena *arena, Type *base);
+// Builds the type `[count]element`
+Type *type_array_of(Arena *arena, Type *element, size_t count);
+// The concrete type an untyped literal takes when nothing else decides it
 Type *type_default(Type *type);
 
 #endif // TYPES_H

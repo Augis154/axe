@@ -17,7 +17,7 @@ typedef enum {
 
 typedef struct {
   bool is_param;
-  bool is_address_taken;
+  bool in_memory;
 } SymbolLocal;
 
 typedef struct {

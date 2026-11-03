@@ -344,6 +344,7 @@ static AstExpr *parse_grouping(Parser *parser) {
   return expr;
 }
 
+// '&' expression
 static AstExpr *parse_addr_of(Parser *parser) {
   SourceLoc start_loc = parser->previous.loc;
 
@@ -356,6 +357,7 @@ static AstExpr *parse_addr_of(Parser *parser) {
   return addr_of_expr;
 }
 
+// expression '.*'  -- the '.*' is already consumed.
 static AstExpr *parse_deref(Parser *parser, AstExpr *left) {
   if (!left) return NULL;
 
@@ -363,6 +365,22 @@ static AstExpr *parse_deref(Parser *parser, AstExpr *left) {
   deref_expr->expr_deref.operand = left;
 
   return deref_expr;
+}
+
+// expression '[' expression ']'  -- the '[' is already consumed.
+static AstExpr *parse_subscript(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+
+  AstExpr *index = parse_expression(parser);
+  if (!index) return NULL;
+
+  consume(parser, TOKEN_RBRACKET, "Expected ']' after subscript index.");
+
+  AstExpr *subscript_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_SUBSCRIPT, left->loc);
+  subscript_expr->expr_subscript.target = left;
+  subscript_expr->expr_subscript.index = index;
+
+  return subscript_expr;
 }
 
 // callee '(' [ expression { ',' expression } [ ',' ] ] ')'  -- the '(' is already consumed.
@@ -396,7 +414,7 @@ static AstExpr *parse_call(Parser *parser, AstExpr *left) {
   return call_expr;
 }
 
-// ( '-' | '!' ) expression
+// ( '-' | '!' | '~' ) expression
 static AstExpr *parse_unary(Parser *parser) {
   SourceLoc start_loc = parser->previous.loc;
   TokenKind operator = parser->previous.kind;
@@ -411,7 +429,8 @@ static AstExpr *parse_unary(Parser *parser) {
   return unary_expr;
 }
 
-// left ( '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '>' | '<=' | '>=' ) right  -- left-associative.
+// left ( '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '>' | '<=' | '>=' | '|' | '^' | '&' | '<<' | '>>' ) right
+//   -- left-associative.
 static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
   SourceLoc start_loc = parser->previous.loc;
   TokenKind operator = parser->previous.kind;
@@ -428,6 +447,7 @@ static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
   return binary_expr;
 }
 
+// left ( '&&' | '||' ) right  -- left-associative.
 static AstExpr *parse_logical(Parser *parser, AstExpr *left) {
   SourceLoc start_loc = parser->previous.loc;
   TokenKind operator = parser->previous.kind;
@@ -739,7 +759,7 @@ static AstType *parse_named_type(Parser *parser) {
   return type;
 }
 
-// '*' type
+// '*T' type
 static AstType *parse_pointer_type(Parser *parser) {
   SourceLoc start_loc = parser->current.loc;
 
@@ -750,6 +770,27 @@ static AstType *parse_pointer_type(Parser *parser) {
 
   AstType *type = ast_type_new(&parser->comp_unit->arena, AST_TYPE_POINTER, start_loc);
   type->pointer.base = base_type;
+
+  return type;
+}
+
+// '[N]T' type
+static AstType *parse_array_type(Parser *parser) {
+  SourceLoc start_loc = parser->current.loc;
+
+  consume(parser, TOKEN_LBRACKET, "Expected '[' for array type.");
+
+  AstExpr *size_expr = parse_expression(parser);
+  if (!size_expr) return NULL;
+
+  consume(parser, TOKEN_RBRACKET, "Expected ']' after array size.");
+
+  AstType *base_type = parse_type(parser);
+  if (!base_type) return NULL;
+
+  AstType *type = ast_type_new(&parser->comp_unit->arena, AST_TYPE_ARRAY, start_loc);
+  type->array.element = base_type;
+  type->array.size_expr = size_expr;
 
   return type;
 }
@@ -814,7 +855,7 @@ AstDecl *parse_declaration(Parser *parser) {
   return NULL;
 }
 
-// type := IDENT | '*' type
+// type := IDENT | '*' type | '[' expression ']' type
 AstType *parse_type(Parser *parser) {
   Token token = parser->current;
 
@@ -823,6 +864,8 @@ AstType *parse_type(Parser *parser) {
     return parse_named_type(parser);
   case TOKEN_STAR:
     return parse_pointer_type(parser);
+  case TOKEN_LBRACKET:
+    return parse_array_type(parser);
 
   default:
     return NULL;
@@ -913,5 +956,6 @@ static const ParseRule rules[TOKEN_COUNT] = {
 
   // Postfix and grouping; '(' is the call operator and also starts a parenthesised expression
   [TOKEN_LPAREN] = {PREC_POSTFIX, parse_grouping, parse_call},
+  [TOKEN_LBRACKET] = {PREC_POSTFIX, NULL, parse_subscript},
   [TOKEN_DEREF] = {PREC_POSTFIX, NULL, parse_deref},
 };

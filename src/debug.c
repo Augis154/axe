@@ -85,6 +85,14 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     printf(")");
     return;
 
+  case AST_EXPR_SUBSCRIPT:
+    printf("([] ");
+    debug_print_ast_sexpr(arena, expr->expr_subscript.target);
+    printf(" ");
+    debug_print_ast_sexpr(arena, expr->expr_subscript.index);
+    printf(")");
+    return;
+
   case AST_EXPR_CALL:
     printf("(call ");
     debug_print_ast_sexpr(arena, expr->expr_call.callee);

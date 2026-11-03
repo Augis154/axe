@@ -170,6 +170,7 @@ static Token number(Lexer *lex) {
   return new_token(lex, is_float ? TOKEN_FLOAT : TOKEN_INT);
 }
 
+// An identifier, or a keyword when the text is reserved.
 static Token identifier(Lexer *lex) {
   while (is_alnum(peek(lex))) {
     advance(lex);
@@ -218,6 +219,10 @@ Token lexer_get_token(Lexer *lex) {
     return new_token(lex, TOKEN_LBRACE);
   case '}':
     return new_token(lex, TOKEN_RBRACE);
+  case '[':
+    return new_token(lex, TOKEN_LBRACKET);
+  case ']':
+    return new_token(lex, TOKEN_RBRACKET);
 
   case ',':
     return new_token(lex, TOKEN_COMMA);

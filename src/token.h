@@ -45,6 +45,8 @@
   X(TOKEN_RPAREN, ")")    \
   X(TOKEN_LBRACE, "{")    \
   X(TOKEN_RBRACE, "}")    \
+  X(TOKEN_LBRACKET, "[")  \
+  X(TOKEN_RBRACKET, "]")  \
                           \
   X(TOKEN_DOT, ".")       \
   X(TOKEN_COMMA, ",")     \

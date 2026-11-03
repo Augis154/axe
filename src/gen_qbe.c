@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// The QBE type letter of an IR type; pointers are 64-bit.
 static char qbe_type_char(IrType type) {
   switch (type) {
   case IR_TYPE_NONE:
@@ -28,11 +29,13 @@ static char qbe_type_char(IrType type) {
   return 'w';
 }
 
+// The QBE type letter of a register.
 static inline char reg_type_char(const IrFunction *func, IrReg reg) {
   assert(reg.id != NULL_REG.id && reg.id < da_len(func->reg_types) && "register without a recorded type");
   return qbe_type_char(func->reg_types[reg.id]);
 }
 
+// Writes one IR instruction as QBE IL.
 static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
   switch (inst.op) {
   case IR_OP_NONE:
@@ -282,6 +285,7 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
   UNREACHABLE("unhandled IR opcode");
 }
 
+// Writes a function: signature, entry label, then its instructions.
 static void qbe_write_function(FILE *file, const IrFunction *func) {
   fprintf(file, "export function ");
 

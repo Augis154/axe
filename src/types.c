@@ -53,6 +53,15 @@ bool type_is_pointer(Type *type) {
   return type->kind == TYPE_KIND_POINTER;
 }
 
+bool type_is_array(Type *type) {
+  if (!type) return false;
+  return type->kind == TYPE_KIND_ARRAY;
+}
+
+bool type_is_aggregate(Type *type) {
+  return type_is_array(type);
+}
+
 bool type_is_untyped(Type *type) {
   return type == type_untyped_int || type == type_untyped_float || type == type_untyped_null;
 }
@@ -87,6 +96,10 @@ bool type_equals(Type *a, Type *b) {
     return type_equals(a->pointer.base, b->pointer.base);
   }
 
+  if (type_is_array(a) && type_is_array(b)) {
+    return a->array.count == b->array.count && type_equals(a->array.element, b->array.element);
+  }
+
   return false;
 }
 
@@ -119,6 +132,11 @@ bool type_can_widen_to(Type *from, Type *to) {
   // Any pointer converts implicitly to `*void`; the way back needs an explicit cast.
   if (type_is_pointer(from) && type_is_pointer(to)) {
     return type_is_void(to->pointer.base);
+  }
+
+  // An array converts to a pointer to its elements (or to `*void`); it is already represented by its address.
+  if (type_is_array(from) && type_is_pointer(to)) {
+    return type_is_void(to->pointer.base) || type_equals(from->array.element, to->pointer.base);
   }
 
   return false;
@@ -158,6 +176,22 @@ Type *type_pointer_to(Arena *arena, Type *base) {
   };
 
   return ptr_type;
+}
+
+Type *type_array_of(Arena *arena, Type *element, size_t count) {
+  size_t name_len = strlen(element->name) + 16;
+  char *name = arena_alloc(arena, name_len);
+  snprintf(name, name_len, "[%zu]%s", count, element->name);
+
+  Type *array_type = arena_alloc(arena, sizeof(Type));
+  *array_type = (Type){
+    .kind = TYPE_KIND_ARRAY,
+    .name = name,
+    .size = element->size * count,
+    .array = {.element = element, .count = count},
+  };
+
+  return array_type;
 }
 
 Type *type_default(Type *type) {
