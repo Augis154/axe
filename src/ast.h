@@ -54,9 +54,10 @@ typedef enum {
   AST_EXPR_LITERAL,
   AST_EXPR_IDENTIFIER,
 
-  // Access: address-of, dereference and call
+  // Access: address-of, dereference, subscript and call
   AST_EXPR_ADDR_OF,
   AST_EXPR_DEREF,
+  AST_EXPR_SUBSCRIPT,
   AST_EXPR_CALL,
 
   // Operators
@@ -105,6 +106,11 @@ typedef struct {
 } AstExprDeref;
 
 typedef struct {
+  AstExpr *target;
+  AstExpr *index;
+} AstExprSubscript;
+
+typedef struct {
   AstExpr *callee;
   AstExpr **arguments;
   size_t argument_count;
@@ -149,6 +155,7 @@ struct AstExpr_ {
 
     AstExprAddrOf expr_addr_of;
     AstExprDeref expr_deref;
+    AstExprSubscript expr_subscript;
     AstExprCall expr_call;
 
     AstExprUnary expr_unary;
@@ -269,11 +276,17 @@ typedef enum {
 
   AST_TYPE_NAMED,
   AST_TYPE_POINTER,
+  AST_TYPE_ARRAY,
 } AstTypeKind;
 
 typedef struct {
   AstType *base;
 } AstTypePointer;
+
+typedef struct {
+  AstType *element;
+  AstExpr *size_expr;
+} AstTypeArray;
 
 struct AstType_ {
   AstTypeKind kind;
@@ -283,6 +296,7 @@ struct AstType_ {
   union {
     const char *named;
     AstTypePointer pointer;
+    AstTypeArray array;
   };
 };
 

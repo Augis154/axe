@@ -139,8 +139,8 @@ static bool is_lvalue(const AstExpr *expr) {
 
     return sym->kind == SYMBOL_GLOBAL_VAR || sym->kind == SYMBOL_LOCAL_VAR;
   }
-
   case AST_EXPR_DEREF:
+  case AST_EXPR_SUBSCRIPT:
     return true;
 
   default:
@@ -160,6 +160,8 @@ static const char *describe_expr(const AstExpr *expr) {
     return "an address-of expression";
   case AST_EXPR_DEREF:
     return "a dereference";
+  case AST_EXPR_SUBSCRIPT:
+    return "a subscript";
   case AST_EXPR_CALL:
     return "a function call result";
 
@@ -281,6 +283,7 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
   return type_error;
 }
 
+// Resolves a name to a variable; type and function names are not values.
 static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   Symbol *sym = scope_lookup(ctx, expr->expr_identifier.name);
   if (!sym) {
@@ -306,6 +309,7 @@ static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   return sym->type;
 }
 
+// Types `&x`: an lvalue operand, giving a pointer to it. A variable whose address is taken lives in memory.
 static Type *sema_expr_addr_of(SemaContext *ctx, AstExpr *expr) {
   AstExpr *operand = expr->expr_addr_of.operand;
   Type *operand_type = sema_expr(ctx, operand);
@@ -322,12 +326,13 @@ static Type *sema_expr_addr_of(SemaContext *ctx, AstExpr *expr) {
   if (operand->kind == AST_EXPR_IDENTIFIER) {
     Symbol *sym = operand->expr_identifier.symbol;
     assert(sym->kind == SYMBOL_LOCAL_VAR && "sema rejects type and function names as values");
-    sym->local.is_address_taken = true;
+    sym->local.in_memory = true;
   }
 
   return type_pointer_to(&ctx->comp_unit->arena, operand_type);
 }
 
+// Types `p.*`: the operand must be a pointer to a type with storage.
 static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
   AstExpr *operand = expr->expr_deref.operand;
   Type *operand_type = sema_expr(ctx, operand);
@@ -349,6 +354,30 @@ static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
   return operand_type->pointer.base;
 }
 
+// Types `xs[i]`: the target must be an array and the index an integer, which is converted to i64.
+static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
+  Type *target_type = sema_expr(ctx, expr->expr_subscript.target);
+  Type *index_type = sema_expr(ctx, expr->expr_subscript.index);
+
+  if (target_type == type_error || index_type == type_error) {
+    return type_error;
+  }
+
+  if (target_type->kind != TYPE_KIND_ARRAY) {
+    sema_error(ctx, expr->loc, "Cannot subscript non-array type '%s'", target_type->name);
+    return type_error;
+  }
+
+  if (!type_is_integer(index_type)) {
+    sema_error(ctx, expr->loc, "Array index must be an integer, got '%s'", index_type->name);
+    return type_error;
+  }
+
+  sema_coerce(ctx, &expr->expr_subscript.index, type_i64);
+
+  return target_type->array.element;
+}
+
 // Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
 static void sema_call_arguments(SemaContext *ctx, AstExpr *expr) {
   for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
@@ -356,6 +385,7 @@ static void sema_call_arguments(SemaContext *ctx, AstExpr *expr) {
   }
 }
 
+// Types a call: the callee must be a function and each argument converts to its parameter type.
 static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   AstExpr *callee = expr->expr_call.callee;
 
@@ -423,6 +453,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   return arguments_ok ? func_type->return_type : type_error;
 }
 
+// Types `-x`, `!x` and `~x`: numeric, bool and integer operands respectively.
 static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
   Type *operand_type = sema_expr(ctx, expr->expr_unary.operand);
 
@@ -524,7 +555,7 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_ADD:
   case BINOP_SUB:
   case BINOP_MUL:
-  case BINOP_DIV:
+  case BINOP_DIV: {
     if (type_is_pointer(left_type) || type_is_pointer(right_type)) {
       return sema_pointer_arithmetic(ctx, expr, left_type, right_type);
     }
@@ -548,11 +579,13 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
     }
 
     return common_type;
+  }
 
   case BINOP_EQ:
   case BINOP_NOT_EQ: {
     if (!type_is_comparable(left_type) || !type_is_comparable(right_type)) {
-      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", left_type->name);
+      Type *bad_type = type_is_comparable(left_type) ? right_type : left_type;
+      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", bad_type->name);
       return type_error;
     }
 
@@ -631,6 +664,7 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   return type_error;
 }
 
+// Types `a && b` and `a || b`: both operands must be bool.
 static Type *sema_expr_logical(SemaContext *ctx, AstExpr *expr) {
   Type *left_type = sema_expr(ctx, expr->expr_logical.left);
   Type *right_type = sema_expr(ctx, expr->expr_logical.right);
@@ -698,6 +732,7 @@ static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
   return type_error;
 }
 
+// Types `target = value`: the target must be an lvalue that is not an array, and the value converts to its type.
 static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   AstExpr *target = expr->expr_assign.target;
 
@@ -735,6 +770,12 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
     }
   }
 
+  if (type_is_array(target_type)) {
+    sema_error(
+      ctx, expr->loc, "Cannot assign to an array of type '%s'; arrays cannot be copied yet", target_type->name);
+    return type_error;
+  }
+
   if (!type_can_widen_to(value_type, target_type)) {
     sema_error(ctx, expr->loc, "Cannot assign '%s' to '%s'", value_type->name, target_type->name);
     return type_error;
@@ -745,6 +786,7 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   return target_type;
 }
 
+// Analyses an expression, records its type and returns it.
 Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
   assert(expr && "sema_expr called without an expression");
 
@@ -765,6 +807,10 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_DEREF:
     result_type = sema_expr_deref(ctx, expr);
+    break;
+
+  case AST_EXPR_SUBSCRIPT:
+    result_type = sema_expr_subscript(ctx, expr);
     break;
 
   case AST_EXPR_CALL:
@@ -841,6 +887,12 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
     var_type = type_error;
   }
 
+  if (stmt->stmt_local_var.init && type_is_array(var_type)) {
+    sema_error(
+      ctx, stmt->loc, "Cannot initialize array '%s' with a value; arrays cannot be copied", stmt->stmt_local_var.name);
+    var_type = type_error;
+  }
+
   if (expected_type && init_type && !type_can_widen_to(init_type, var_type)) {
     sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, var_type->name);
 
@@ -862,6 +914,10 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
       sema_error(ctx, stmt->loc, "Redeclaration of '%s' in current scope", stmt->stmt_local_var.name);
     }
     return;
+  }
+
+  if (type_is_aggregate(var_type)) {
+    sym->local.in_memory = true;
   }
 
   sym->is_defined = stmt->stmt_local_var.init != NULL;
@@ -926,6 +982,7 @@ static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
   ctx->loop_depth--;
 }
 
+// Analyses a statement.
 void sema_stmt(SemaContext *ctx, AstStmt *stmt) {
   assert(ctx->current_function && "statements only appear inside functions");
 
@@ -966,6 +1023,15 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
 
   Type *return_type = sema_type(ctx, func_decl->declared_return_type);
 
+  if (type_is_array(return_type)) {
+    sema_error(ctx,
+               decl->loc,
+               "Function '%s' cannot return array type '%s'; arrays cannot be copied",
+               func_decl->name,
+               return_type->name);
+    return_type = type_error;
+  }
+
   Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * func_decl->param_count);
   for (size_t i = 0; i < func_decl->param_count; i++) {
     param_types[i] = sema_type(ctx, func_decl->params[i].declared_type);
@@ -974,6 +1040,13 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
       sema_error(ctx,
                  func_decl->params[i].loc,
                  "Cannot declare parameter '%s' of type '%s'",
+                 func_decl->params[i].name,
+                 param_types[i]->name);
+      param_types[i] = type_error;
+    } else if (type_is_array(param_types[i])) {
+      sema_error(ctx,
+                 func_decl->params[i].loc,
+                 "Cannot declare parameter '%s' of array type '%s'; arrays cannot be copied",
                  func_decl->params[i].name,
                  param_types[i]->name);
       param_types[i] = type_error;
@@ -1061,7 +1134,7 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
   ctx->current_function = prev_func;
 }
 
-void sema_pass2_decl(SemaContext *ctx, AstDecl *decl) {
+static void sema_pass2_decl(SemaContext *ctx, AstDecl *decl) {
   switch (decl->kind) {
   case AST_DECL_FUNCTION: {
     return sema_pass2_decl_function(ctx, decl);
@@ -1076,6 +1149,7 @@ void sema_pass2_decl(SemaContext *ctx, AstDecl *decl) {
 
 // Type semantic analysis functions
 
+// Resolves a type name such as i32.
 static Type *sema_type_named(SemaContext *ctx, AstType *type) {
   assert(type->named && "the parser always provides the name of a named type");
 
@@ -1094,6 +1168,7 @@ static Type *sema_type_named(SemaContext *ctx, AstType *type) {
   return sym->type;
 }
 
+// Resolves `*T`.
 static Type *sema_type_pointer(SemaContext *ctx, AstType *type) {
   Type *base_type = sema_type(ctx, type->pointer.base);
 
@@ -1104,7 +1179,36 @@ static Type *sema_type_pointer(SemaContext *ctx, AstType *type) {
   return type_pointer_to(&ctx->comp_unit->arena, base_type);
 }
 
-// Resolves a written type to a Type: no type means void, and pointer types are not implemented yet.
+// Resolves `[N]T`: the size must be a positive integer literal.
+static Type *sema_type_array(SemaContext *ctx, AstType *type) {
+  Type *element_type = sema_type(ctx, type->array.element);
+  Type *size_type = sema_expr(ctx, type->array.size_expr);
+
+  if (element_type == type_error || size_type == type_error) {
+    return type_error;
+  }
+
+  if (!type_is_integer(size_type)) {
+    sema_error(ctx, type->array.size_expr->loc, "Array size must be an integer, got '%s'", size_type->name);
+    return type_error;
+  }
+
+  if (type->array.size_expr->kind != AST_EXPR_LITERAL) {
+    sema_error(ctx, type->array.size_expr->loc, "Array size must be an integer literal");
+    return type_error;
+  }
+
+  size_t size_value = type->array.size_expr->expr_literal.int_value;
+
+  if (size_value == 0) {
+    sema_error(ctx, type->array.size_expr->loc, "Array size must be greater than zero");
+    return type_error;
+  }
+
+  return type_array_of(&ctx->comp_unit->arena, element_type, size_value);
+}
+
+// Resolves a written type to a Type: no type means void.
 Type *sema_type(SemaContext *ctx, AstType *type) {
   if (!type) {
     return type_void;
@@ -1118,6 +1222,8 @@ Type *sema_type(SemaContext *ctx, AstType *type) {
     return sema_type_named(ctx, type);
   case AST_TYPE_POINTER:
     return sema_type_pointer(ctx, type);
+  case AST_TYPE_ARRAY:
+    return sema_type_array(ctx, type);
   }
 
   sema_error(ctx, type->loc, "Unknown type kind");
