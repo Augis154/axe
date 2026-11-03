@@ -235,22 +235,33 @@ Token lexer_get_token(Lexer *lex) {
   case '/':
     return new_token(lex, TOKEN_SLASH);
   case '^':
-    return new_token(lex, TOKEN_BIT_XOR);
+    return new_token(lex, TOKEN_CARET);
+  case '~':
+    return new_token(lex, TOKEN_TILDE);
 
   // Tokens that lookahead
   case '.':
     return match_next(lex, '*', TOKEN_DEREF, TOKEN_DOT);
-  case '|':
-    return match_next(lex, '|', TOKEN_OR, TOKEN_BIT_OR);
   case '&':
-    return match_next(lex, '&', TOKEN_AND, TOKEN_BIT_AND);
+    return match_next(lex, '&', TOKEN_AND, TOKEN_AMP);
+  case '|':
+    return match_next(lex, '|', TOKEN_OR, TOKEN_PIPE);
+
   case '=':
     return match_next(lex, '=', TOKEN_EQ, TOKEN_ASSIGN);
   case '!':
     return match_next(lex, '=', TOKEN_NOT_EQ, TOKEN_BANG);
   case '<':
+    if (peek(lex) == '<') {
+      advance(lex);
+      return new_token(lex, TOKEN_SHL);
+    }
     return match_next(lex, '=', TOKEN_LESS_EQ, TOKEN_LESS);
   case '>':
+    if (peek(lex) == '>') {
+      advance(lex);
+      return new_token(lex, TOKEN_SHR);
+    }
     return match_next(lex, '=', TOKEN_GREATER_EQ, TOKEN_GREATER);
 
   default:

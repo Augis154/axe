@@ -326,6 +326,14 @@ static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
 
     return operand_type;
 
+  case UNOP_BIT_NOT:
+    if (!type_is_integer(operand_type)) {
+      sema_error(ctx, expr->loc, "Unary '~' operator requires integer type");
+      return type_error;
+    }
+
+    return operand_type;
+
   case UNOP_COUNT:
     sema_error(ctx, expr->loc, "Invalid unary operator");
     return type_error;
@@ -503,9 +511,9 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
     return type_bool;
   }
 
-  case BINOP_BIT_AND:
+  case BINOP_BIT_OR:
   case BINOP_BIT_XOR:
-  case BINOP_BIT_OR: {
+  case BINOP_BIT_AND: {
     if (!type_is_integer(left_type) || !type_is_integer(right_type)) {
       sema_error(ctx, expr->loc, "Bitwise operators require integer operands");
       return type_error;
@@ -518,10 +526,22 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
       return type_error;
     }
 
-    sema_coerce(ctx, &expr->expr_binary.left, type_default(common_type));
-    sema_coerce(ctx, &expr->expr_binary.right, type_default(common_type));
+    if (!type_is_untyped(common_type)) {
+      sema_coerce(ctx, &expr->expr_binary.left, common_type);
+      sema_coerce(ctx, &expr->expr_binary.right, common_type);
+    }
 
     return common_type;
+  }
+
+  case BINOP_SHL:
+  case BINOP_SHR: {
+    if (!type_is_integer(left_type) || !type_is_integer(right_type)) {
+      sema_error(ctx, expr->loc, "Shift operators require integer operands");
+      return type_error;
+    }
+
+    return left_type;
   }
 
   case BINOP_COUNT:

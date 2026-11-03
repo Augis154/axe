@@ -16,13 +16,14 @@ typedef enum {
   PREC_LOGIC_AND,  // &&
   PREC_EQUALITY,   // == !=
   PREC_COMPARISON, // < > <= >=
-  PREC_BIT_AND,    // &
-  PREC_BIT_XOR,    // ^
   PREC_BIT_OR,     // |
+  PREC_BIT_XOR,    // ^
+  PREC_BIT_AND,    // &
+  PREC_SHIFT,      // << >>
   PREC_TERM,       // + -
   PREC_FACTOR,     // * /
   PREC_CAST,       // as
-  PREC_PREFIX,     // -
+  PREC_PREFIX,     // ! ~ - &
   PREC_POSTFIX,    // . () []
 } Precedence;
 
@@ -176,6 +177,8 @@ static UnaryOp get_unary_op(TokenKind kind) {
     return UNOP_NEGATE;
   case TOKEN_BANG:
     return UNOP_NOT;
+  case TOKEN_TILDE:
+    return UNOP_BIT_NOT;
 
   default:
     error_at(NULL, (Token){.kind = kind}, "Invalid unary operator.");
@@ -207,12 +210,16 @@ static BinaryOp get_binary_op(TokenKind kind) {
   case TOKEN_GREATER_EQ:
     return BINOP_GREATER_EQ;
 
-  case TOKEN_BIT_AND:
-    return BINOP_BIT_AND;
-  case TOKEN_BIT_XOR:
-    return BINOP_BIT_XOR;
-  case TOKEN_BIT_OR:
+  case TOKEN_PIPE:
     return BINOP_BIT_OR;
+  case TOKEN_CARET:
+    return BINOP_BIT_XOR;
+  case TOKEN_AMP:
+    return BINOP_BIT_AND;
+  case TOKEN_SHL:
+    return BINOP_SHL;
+  case TOKEN_SHR:
+    return BINOP_SHR;
 
   default:
     error_at(NULL, (Token){.kind = kind}, "Invalid binary operator.");
@@ -222,10 +229,10 @@ static BinaryOp get_binary_op(TokenKind kind) {
 
 static LogicalOp get_logical_op(TokenKind kind) {
   switch (kind) {
-  case TOKEN_AND:
-    return LOGIC_AND;
   case TOKEN_OR:
     return LOGIC_OR;
+  case TOKEN_AND:
+    return LOGIC_AND;
 
   default:
     error_at(NULL, (Token){.kind = kind}, "Invalid logical operator.");
@@ -867,7 +874,7 @@ static const ParseRule rules[TOKEN_COUNT] = {
 
   // Prefix-only operators
   [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
-  [TOKEN_AMP] = {PREC_NONE, parse_addr_of, NULL},
+  [TOKEN_TILDE] = {PREC_NONE, parse_unary, NULL},
 
   // Assignment
   [TOKEN_ASSIGN] = {PREC_ASSIGNMENT, NULL, parse_assignment},
@@ -886,10 +893,12 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_LESS_EQ] = {PREC_COMPARISON, NULL, parse_binary},
   [TOKEN_GREATER_EQ] = {PREC_COMPARISON, NULL, parse_binary},
 
-  // Bitwise
-  [TOKEN_BIT_AND] = {PREC_BIT_AND, NULL, parse_binary},
-  [TOKEN_BIT_XOR] = {PREC_BIT_XOR, NULL, parse_binary},
-  [TOKEN_BIT_OR] = {PREC_BIT_OR, NULL, parse_binary},
+  // Bitwise and shifts; '&' is also the prefix address-of
+  [TOKEN_PIPE] = {PREC_BIT_OR, NULL, parse_binary},
+  [TOKEN_CARET] = {PREC_BIT_XOR, NULL, parse_binary},
+  [TOKEN_AMP] = {PREC_BIT_AND, parse_addr_of, parse_binary},
+  [TOKEN_SHL] = {PREC_SHIFT, NULL, parse_binary},
+  [TOKEN_SHR] = {PREC_SHIFT, NULL, parse_binary},
 
   // Additive; '-' is also the prefix negation
   [TOKEN_PLUS] = {PREC_TERM, NULL, parse_binary},

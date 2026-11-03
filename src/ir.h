@@ -37,9 +37,12 @@ typedef enum {
   IR_OP_CMP_GE,
 
   // Bitwise operations
-  IR_OP_BIT_AND,
-  IR_OP_BIT_XOR,
+  IR_OP_BIT_NOT,
   IR_OP_BIT_OR,
+  IR_OP_BIT_XOR,
+  IR_OP_BIT_AND,
+  IR_OP_SHL,
+  IR_OP_SHR,
 
   // Conversions between integer and float
   IR_OP_ITOF,

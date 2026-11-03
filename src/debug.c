@@ -326,14 +326,23 @@ void debug_print_ir_function(IrFunction *func) {
       continue;
 
     // Bitwise operations
-    case IR_OP_BIT_AND:
-      printf("%zu: r%u = r%u & r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+    case IR_OP_BIT_NOT:
+      printf("%zu: r%u = ~r%u\n", i, inst->res.id, inst->arg1.id);
+      continue;
+    case IR_OP_BIT_OR:
+      printf("%zu: r%u = r%u | r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_BIT_XOR:
       printf("%zu: r%u = r%u ^ r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
-    case IR_OP_BIT_OR:
-      printf("%zu: r%u = r%u | r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+    case IR_OP_BIT_AND:
+      printf("%zu: r%u = r%u & r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      continue;
+    case IR_OP_SHL:
+      printf("%zu: r%u = r%u << r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      continue;
+    case IR_OP_SHR:
+      printf("%zu: r%u = r%u >> r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
       continue;
 
     // Conversions between integer and float
@@ -433,6 +442,6 @@ static const char *binop_strings[BINOP_COUNT] = {
 };
 
 static const char *logicop_strings[LOGIC_COUNT] = {
-  [LOGIC_AND] = "&&",
   [LOGIC_OR] = "||",
+  [LOGIC_AND] = "&&",
 };
