@@ -183,6 +183,8 @@ static IrOp get_unary_ir_op(UnaryOp op) {
     return IR_OP_NEGATE;
   case UNOP_NOT:
     return IR_OP_NOT;
+  case UNOP_BIT_NOT:
+    return IR_OP_BIT_NOT;
 
   case UNOP_COUNT:
     UNREACHABLE("UNOP_COUNT is not a valid operator");
@@ -215,12 +217,16 @@ static IrOp get_binary_ir_op(BinaryOp op) {
   case BINOP_GREATER_EQ:
     return IR_OP_CMP_GE;
 
-  case BINOP_BIT_AND:
-    return IR_OP_BIT_AND;
-  case BINOP_BIT_XOR:
-    return IR_OP_BIT_XOR;
   case BINOP_BIT_OR:
     return IR_OP_BIT_OR;
+  case BINOP_BIT_XOR:
+    return IR_OP_BIT_XOR;
+  case BINOP_BIT_AND:
+    return IR_OP_BIT_AND;
+  case BINOP_SHL:
+    return IR_OP_SHL;
+  case BINOP_SHR:
+    return IR_OP_SHR;
 
   case BINOP_COUNT:
     UNREACHABLE("BINOP_COUNT is not a valid operator");
@@ -511,9 +517,9 @@ static IrReg emit_logical_op(IrGenContext *ctx, AstExpr *expr) {
   emit_ir_inst(ctx, left_copy_inst);
 
   switch (op) {
-  case LOGIC_AND: {
+  case LOGIC_OR: {
     IrInstr jump_inst = {
-      .op = IR_OP_JNZ,
+      .op = IR_OP_JZ,
       .arg1 = res,
       .target_true = right_label,
       .target_false = end_label,
@@ -521,9 +527,9 @@ static IrReg emit_logical_op(IrGenContext *ctx, AstExpr *expr) {
     emit_ir_inst(ctx, jump_inst);
     break;
   }
-  case LOGIC_OR: {
+  case LOGIC_AND: {
     IrInstr jump_inst = {
-      .op = IR_OP_JZ,
+      .op = IR_OP_JNZ,
       .arg1 = res,
       .target_true = right_label,
       .target_false = end_label,

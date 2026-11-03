@@ -11,6 +11,7 @@
 typedef enum {
   UNOP_NEGATE,
   UNOP_NOT,
+  UNOP_BIT_NOT,
 
   UNOP_COUNT,
 } UnaryOp;
@@ -28,16 +29,18 @@ typedef enum {
   BINOP_LESS_EQ,
   BINOP_GREATER_EQ,
 
-  BINOP_BIT_AND,
-  BINOP_BIT_XOR,
   BINOP_BIT_OR,
+  BINOP_BIT_XOR,
+  BINOP_BIT_AND,
+  BINOP_SHL,
+  BINOP_SHR,
 
   BINOP_COUNT,
 } BinaryOp;
 
 typedef enum {
-  LOGIC_AND,
   LOGIC_OR,
+  LOGIC_AND,
 
   LOGIC_COUNT,
 } LogicalOp;

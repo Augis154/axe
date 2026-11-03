@@ -58,7 +58,7 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
     return;
   }
 
-    // Memory
+  // Memory
   case IR_OP_ALLOC: {
     int align = inst.int_lit <= 4 ? 4 : 8;
     fprintf(file, "  %%r%u =l alloc%d %ld\n", inst.res.id, align, inst.int_lit);
@@ -161,14 +161,23 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
     return;
   }
 
+  // Unary bitwise operations
+  case IR_OP_BIT_NOT:
+    fprintf(file, "  %%r%u =%c xor %%r%u, -1\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
+    return;
+
   // Binary bitwise operations
-  case IR_OP_BIT_AND:
+  case IR_OP_BIT_OR:
   case IR_OP_BIT_XOR:
-  case IR_OP_BIT_OR: {
+  case IR_OP_BIT_AND:
+  case IR_OP_SHL:
+  case IR_OP_SHR: {
     static const char *op_names[] = {
-      [IR_OP_BIT_AND] = "and",
-      [IR_OP_BIT_XOR] = "xor",
       [IR_OP_BIT_OR] = "or",
+      [IR_OP_BIT_XOR] = "xor",
+      [IR_OP_BIT_AND] = "and",
+      [IR_OP_SHL] = "shl",
+      [IR_OP_SHR] = "sar",
     };
     fprintf(file,
             "  %%r%u =%c %s %%r%u, %%r%u\n",

@@ -24,9 +24,11 @@
   X(TOKEN_LESS_EQ, "<=")    \
   X(TOKEN_GREATER_EQ, ">=") \
                             \
-  X(TOKEN_BIT_AND, "&")     \
-  X(TOKEN_BIT_XOR, "^")     \
-  X(TOKEN_BIT_OR, "|")      \
+  X(TOKEN_PIPE, "|")        \
+  X(TOKEN_CARET, "^")       \
+  X(TOKEN_AMP, "&")         \
+  X(TOKEN_SHL, "<<")        \
+  X(TOKEN_SHR, ">>")        \
                             \
   X(TOKEN_PLUS, "+")        \
   X(TOKEN_MINUS, "-")       \
@@ -35,7 +37,7 @@
   X(TOKEN_SLASH, "/")       \
                             \
   X(TOKEN_BANG, "!")        \
-  X(TOKEN_AMP, "&")         \
+  X(TOKEN_TILDE, "~")       \
   X(TOKEN_DEREF, ".*")
 
 #define TOKENS_SYMBOLS(X) \
