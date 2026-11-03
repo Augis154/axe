@@ -73,12 +73,6 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     printf("%s", expr->expr_identifier.name);
     return;
 
-  case AST_EXPR_UNARY:
-    printf("(%s ", unop_strings[expr->expr_unary.op]);
-    debug_print_ast_sexpr(arena, expr->expr_unary.operand);
-    printf(")");
-    return;
-
   case AST_EXPR_ADDR_OF:
     printf("(& ");
     debug_print_ast_sexpr(arena, expr->expr_addr_of.operand);
@@ -88,6 +82,22 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
   case AST_EXPR_DEREF:
     printf("(.* ");
     debug_print_ast_sexpr(arena, expr->expr_deref.operand);
+    printf(")");
+    return;
+
+  case AST_EXPR_CALL:
+    printf("(call ");
+    debug_print_ast_sexpr(arena, expr->expr_call.callee);
+    for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+      printf(" ");
+      debug_print_ast_sexpr(arena, expr->expr_call.arguments[i]);
+    }
+    printf(")");
+    return;
+
+  case AST_EXPR_UNARY:
+    printf("(%s ", unop_strings[expr->expr_unary.op]);
+    debug_print_ast_sexpr(arena, expr->expr_unary.operand);
     printf(")");
     return;
 
@@ -118,16 +128,6 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     debug_print_ast_sexpr(arena, expr->expr_assign.target);
     printf(" ");
     debug_print_ast_sexpr(arena, expr->expr_assign.value);
-    printf(")");
-    return;
-
-  case AST_EXPR_CALL:
-    printf("(call ");
-    debug_print_ast_sexpr(arena, expr->expr_call.callee);
-    for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
-      printf(" ");
-      debug_print_ast_sexpr(arena, expr->expr_call.arguments[i]);
-    }
     printf(")");
     return;
 

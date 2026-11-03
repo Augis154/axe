@@ -307,33 +307,32 @@ static IrReg emit_identifier(IrGenContext *ctx, AstExpr *expr) {
   return reg;
 }
 
-static IrReg emit_assignment(IrGenContext *ctx, AstExpr *expr) {
-  assert(expr && "emit_assignment: expr is NULL");
+static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_addr_of: expr is NULL");
 
-  AstExpr *target = expr->expr_assign.target;
+  AstExpr *operand = expr->expr_addr_of.operand;
 
-  if (target->kind == AST_EXPR_DEREF) {
-    IrReg ptr_reg = emit_expression(ctx, target->expr_deref.operand);
-    IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
-
-    IrInstr inst = {
-      .op = IR_OP_STORE,
-      .arg1 = value_reg,
-      .arg2 = ptr_reg,
-    };
-    emit_ir_inst(ctx, inst);
-
-    return value_reg;
+  if (operand->kind == AST_EXPR_DEREF) {
+    return emit_expression(ctx, operand->expr_deref.operand);
   }
 
-  Symbol *target_sym = target->expr_identifier.symbol;
-  IrReg target_reg = get_symbol_reg(ctx, target_sym);
+  Symbol *sym = operand->expr_identifier.symbol;
+  assert(sym->local.is_address_taken && "sema marks every variable whose address is taken");
 
-  IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
+  return get_symbol_reg(ctx, sym);
+}
 
-  IrInstr inst = target_sym->local.is_address_taken
-                   ? (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = target_reg}
-                   : (IrInstr){.op = IR_OP_COPY, .res = target_reg, .arg1 = value_reg};
+static IrReg emit_deref(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_deref: expr is NULL");
+
+  IrReg ptr_reg = emit_expression(ctx, expr->expr_deref.operand);
+  IrReg value_reg = next_reg(ctx, expr_type(ctx, expr));
+
+  IrInstr inst = {
+    .op = IR_OP_LOAD,
+    .res = value_reg,
+    .arg1 = ptr_reg,
+  };
   emit_ir_inst(ctx, inst);
 
   return value_reg;
@@ -386,37 +385,6 @@ static IrReg emit_unary_op(IrGenContext *ctx, AstExpr *expr) {
   emit_ir_inst(ctx, inst);
 
   return res;
-}
-
-static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *expr) {
-  assert(expr && "emit_addr_of: expr is NULL");
-
-  AstExpr *operand = expr->expr_addr_of.operand;
-
-  if (operand->kind == AST_EXPR_DEREF) {
-    return emit_expression(ctx, operand->expr_deref.operand);
-  }
-
-  Symbol *sym = operand->expr_identifier.symbol;
-  assert(sym->local.is_address_taken && "sema marks every variable whose address is taken");
-
-  return get_symbol_reg(ctx, sym);
-}
-
-static IrReg emit_deref(IrGenContext *ctx, AstExpr *expr) {
-  assert(expr && "emit_deref: expr is NULL");
-
-  IrReg ptr_reg = emit_expression(ctx, expr->expr_deref.operand);
-  IrReg value_reg = next_reg(ctx, expr_type(ctx, expr));
-
-  IrInstr inst = {
-    .op = IR_OP_LOAD,
-    .res = value_reg,
-    .arg1 = ptr_reg,
-  };
-  emit_ir_inst(ctx, inst);
-
-  return value_reg;
 }
 
 // `ptr +- int` moves by whole elements and `ptr - ptr` counts them, so offsets are scaled by the pointee size.
@@ -575,6 +543,38 @@ static IrReg emit_cast(IrGenContext *ctx, AstExpr *expr) {
   return emit_cast_if_needed(ctx, value_reg, expr_type(ctx, operand), expr_type(ctx, expr));
 }
 
+static IrReg emit_assignment(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_assignment: expr is NULL");
+
+  AstExpr *target = expr->expr_assign.target;
+
+  if (target->kind == AST_EXPR_DEREF) {
+    IrReg ptr_reg = emit_expression(ctx, target->expr_deref.operand);
+    IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
+
+    IrInstr inst = {
+      .op = IR_OP_STORE,
+      .arg1 = value_reg,
+      .arg2 = ptr_reg,
+    };
+    emit_ir_inst(ctx, inst);
+
+    return value_reg;
+  }
+
+  Symbol *target_sym = target->expr_identifier.symbol;
+  IrReg target_reg = get_symbol_reg(ctx, target_sym);
+
+  IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
+
+  IrInstr inst = target_sym->local.is_address_taken
+                   ? (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = target_reg}
+                   : (IrInstr){.op = IR_OP_COPY, .res = target_reg, .arg1 = value_reg};
+  emit_ir_inst(ctx, inst);
+
+  return value_reg;
+}
+
 static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
   if (!expr) {
     return NULL_REG;
@@ -587,14 +587,17 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
   case AST_EXPR_IDENTIFIER:
     return emit_identifier(ctx, expr);
 
-  case AST_EXPR_UNARY:
-    return emit_unary_op(ctx, expr);
-
   case AST_EXPR_ADDR_OF:
     return emit_addr_of(ctx, expr);
 
   case AST_EXPR_DEREF:
     return emit_deref(ctx, expr);
+
+  case AST_EXPR_CALL:
+    return emit_call(ctx, expr);
+
+  case AST_EXPR_UNARY:
+    return emit_unary_op(ctx, expr);
 
   case AST_EXPR_BINARY:
     return emit_binary_op(ctx, expr);
@@ -607,9 +610,6 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_ASSIGN:
     return emit_assignment(ctx, expr);
-
-  case AST_EXPR_CALL:
-    return emit_call(ctx, expr);
 
   case AST_EXPR_INVALID:
     UNREACHABLE("AST_EXPR_INVALID reached IR generation");
