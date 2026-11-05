@@ -10,20 +10,21 @@
 
 // The QBE type letter of an IR type; pointers are 64-bit.
 static char qbe_type_char(IrType type) {
-  switch (type) {
+  switch (type.kind) {
   case IR_TYPE_NONE:
     return 0;
 
-  case IR_TYPE_I32:
-    return 'w';
-  case IR_TYPE_I64:
+  // Integers narrower than 64 bits live in 32-bit registers
+  case IR_TYPE_INT:
+    return type.size > 4 ? 'l' : 'w';
   case IR_TYPE_PTR:
     return 'l';
 
-  case IR_TYPE_F32:
-    return 's';
-  case IR_TYPE_F64:
-    return 'd';
+  case IR_TYPE_FLOAT:
+    return type.size > 4 ? 'd' : 's';
+
+  case IR_TYPE_AGG:
+    UNREACHABLE("aggregate registers are not lowered yet");
   }
 
   return 'w';
@@ -87,6 +88,10 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
     fprintf(file, "  %%r%u =%c xor %%r%u, 1\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
     return;
 
+  case IR_OP_BIT_NOT:
+    fprintf(file, "  %%r%u =%c xor %%r%u, -1\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
+    return;
+
   // Binary arithmetic
   case IR_OP_ADD:
   case IR_OP_SUB:
@@ -144,30 +149,24 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
     char op_char = reg_type_char(func, inst.arg1);
 
     const char *cmp_name = NULL;
-    switch (func->reg_types[inst.arg1.id]) {
-    case IR_TYPE_I32:
-    case IR_TYPE_I64:
+    switch (func->reg_types[inst.arg1.id].kind) {
+    case IR_TYPE_INT:
       cmp_name = int_cmp_names[inst.op];
       break;
     case IR_TYPE_PTR:
       cmp_name = ptr_cmp_names[inst.op];
       break;
-    case IR_TYPE_F32:
-    case IR_TYPE_F64:
+    case IR_TYPE_FLOAT:
       cmp_name = float_cmp_names[inst.op];
       break;
     case IR_TYPE_NONE:
-      UNREACHABLE("comparison of a register without a type");
+    case IR_TYPE_AGG:
+      UNREACHABLE("comparison of a register without a scalar type");
     }
 
     fprintf(file, "  %%r%u =w %s%c %%r%u, %%r%u\n", inst.res.id, cmp_name, op_char, inst.arg1.id, inst.arg2.id);
     return;
   }
-
-  // Unary bitwise operations
-  case IR_OP_BIT_NOT:
-    fprintf(file, "  %%r%u =%c xor %%r%u, -1\n", inst.res.id, reg_type_char(func, inst.res), inst.arg1.id);
-    return;
 
   // Binary bitwise operations
   case IR_OP_BIT_OR:
@@ -256,7 +255,7 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
   case IR_OP_CALL: {
     IrType ret_type = func->reg_types[inst.res.id];
 
-    if (ret_type == IR_TYPE_NONE) {
+    if (ir_type_is_void(ret_type)) {
       fprintf(file, "  call $%s(", inst.call.callee);
     } else {
       fprintf(file, "  %%r%u =%c call $%s(", inst.res.id, qbe_type_char(ret_type), inst.call.callee);
