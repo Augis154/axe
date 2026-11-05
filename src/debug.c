@@ -290,6 +290,9 @@ void debug_print_ir_function(IrFunction *func) {
     case IR_OP_STORE:
       printf("%zu: STORE [r%u] = r%u\n", i, inst->arg2.id, inst->arg1.id);
       continue;
+    case IR_OP_MEMCPY:
+      printf("%zu: MEMCPY src=[r%u], dst=[r%u], size=%ld\n", i, inst->arg1.id, inst->arg2.id, inst->int_lit);
+      continue;
 
     // Unary arithmetic and logic
     case IR_OP_NEGATE:
