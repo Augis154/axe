@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-// The QBE type letter of an IR type; pointers are 64-bit.
+// The QBE type letter of an IR type; pointers are 64-bit and an aggregate is its address.
 static char qbe_type_char(IrType type) {
   switch (type.kind) {
   case IR_TYPE_NONE:
@@ -23,8 +23,9 @@ static char qbe_type_char(IrType type) {
   case IR_TYPE_FLOAT:
     return type.size > 4 ? 'd' : 's';
 
+  // An aggregate is handled by its address, except in signatures and calls where it is named by qbe_write_abi_type
   case IR_TYPE_AGG:
-    UNREACHABLE("aggregate registers are not lowered yet");
+    return 'l';
   }
 
   return 'w';
@@ -36,8 +37,34 @@ static inline char reg_type_char(const IrFunction *func, IrReg reg) {
   return qbe_type_char(func->reg_types[reg.id]);
 }
 
+// The QBE letter of a field of an aggregate; unlike registers, fields keep their exact width.
+static char qbe_field_char(IrType type) {
+  switch (type.kind) {
+  case IR_TYPE_INT:
+    return type.size == 1 ? 'b' : type.size == 2 ? 'h' : type.size == 4 ? 'w' : 'l';
+  case IR_TYPE_FLOAT:
+    return type.size == 4 ? 's' : 'd';
+  case IR_TYPE_PTR:
+    return 'l';
+  case IR_TYPE_NONE:
+  case IR_TYPE_AGG:
+    break;
+  }
+
+  UNREACHABLE("aggregate field without a scalar type");
+}
+
+// Writes the type of a value crossing a call boundary: `:name` for an aggregate, the type letter otherwise.
+static void qbe_write_abi_type(FILE *file, const IrModule *module, IrType type) {
+  if (type.kind == IR_TYPE_AGG) {
+    fprintf(file, ":%s", module->aggregates[type.agg_id].name);
+  } else {
+    fprintf(file, "%c", qbe_type_char(type));
+  }
+}
+
 // Writes one IR instruction as QBE IL.
-static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
+static void qbe_write_inst(FILE *file, const IrModule *module, const IrFunction *func, IrInstr inst) {
   switch (inst.op) {
   case IR_OP_NONE:
     fprintf(file, "\n");
@@ -76,6 +103,10 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
   case IR_OP_STORE: {
     char type_char = reg_type_char(func, inst.arg1);
     fprintf(file, "  store%c %%r%u, %%r%u\n", type_char, inst.arg1.id, inst.arg2.id);
+    return;
+  }
+  case IR_OP_MEMCPY: {
+    fprintf(file, "  blit %%r%u, %%r%u, %ld\n", inst.arg1.id, inst.arg2.id, inst.int_lit);
     return;
   }
 
@@ -258,14 +289,17 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
     if (ir_type_is_void(ret_type)) {
       fprintf(file, "  call $%s(", inst.call.callee);
     } else {
-      fprintf(file, "  %%r%u =%c call $%s(", inst.res.id, qbe_type_char(ret_type), inst.call.callee);
+      fprintf(file, "  %%r%u =", inst.res.id);
+      qbe_write_abi_type(file, module, ret_type);
+      fprintf(file, " call $%s(", inst.call.callee);
     }
 
     for (size_t i = 0; i < inst.call.arg_count; i++) {
       if (i > 0) fprintf(file, ", ");
 
       IrReg arg_reg = inst.call.args[i];
-      fprintf(file, "%c %%r%u", reg_type_char(func, arg_reg), arg_reg.id);
+      qbe_write_abi_type(file, module, func->reg_types[arg_reg.id]);
+      fprintf(file, " %%r%u", arg_reg.id);
     }
 
     fprintf(file, ")\n");
@@ -284,13 +318,29 @@ static void qbe_write_inst(FILE *file, const IrFunction *func, IrInstr inst) {
   UNREACHABLE("unhandled IR opcode");
 }
 
+// Writes `type :name = align N { ... }` for every aggregate.
+static void qbe_write_aggregates(FILE *file, const IrModule *module) {
+  for (size_t i = 0; i < da_len(module->aggregates); i++) {
+    const IrAggregate *agg = &module->aggregates[i];
+
+    fprintf(file, "type :%s = align %u { ", agg->name, agg->alignment);
+
+    for (size_t j = 0; j < da_len(agg->fields); j++) {
+      if (j > 0) fprintf(file, ", ");
+      fprintf(file, "%c %u", qbe_field_char(agg->fields[j].type), agg->fields[j].count);
+    }
+
+    fprintf(file, " }\n");
+  }
+}
+
 // Writes a function: signature, entry label, then its instructions.
-static void qbe_write_function(FILE *file, const IrFunction *func) {
+static void qbe_write_function(FILE *file, const IrModule *module, const IrFunction *func) {
   fprintf(file, "export function ");
 
-  char return_type_char = qbe_type_char(func->return_type);
-  if (return_type_char > 0) {
-    fprintf(file, "%c ", return_type_char);
+  if (!ir_type_is_void(func->return_type)) {
+    qbe_write_abi_type(file, module, func->return_type);
+    fprintf(file, " ");
   }
 
   fprintf(file, "$%s(", func->name);
@@ -299,13 +349,14 @@ static void qbe_write_function(FILE *file, const IrFunction *func) {
     IrReg param_reg = func->params[i];
 
     if (i > 0) fprintf(file, ", ");
-    fprintf(file, "%c %%r%u", reg_type_char(func, param_reg), param_reg.id);
+    qbe_write_abi_type(file, module, func->reg_types[param_reg.id]);
+    fprintf(file, " %%r%u", param_reg.id);
   }
 
   fprintf(file, ") {\n@start\n");
 
   for (size_t i = 0; i < da_len(func->buffer); i++) {
-    qbe_write_inst(file, func, func->buffer[i]);
+    qbe_write_inst(file, module, func, func->buffer[i]);
   }
 
   fprintf(file, "}\n");
@@ -320,8 +371,10 @@ bool generate_qbe(const char *filename, const IrModule *module) {
 
   fprintf(file, "# Generated QBE IR\n");
 
+  qbe_write_aggregates(file, module);
+
   for (size_t i = 0; i < da_len(module->functions); i++) {
-    qbe_write_function(file, &module->functions[i]);
+    qbe_write_function(file, module, &module->functions[i]);
   }
 
   return fclose(file) == 0;

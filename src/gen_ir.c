@@ -8,9 +8,49 @@
 #include "types.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 
-static IrType get_ir_type(Type *type) {
+static IrType get_ir_type(IrGenContext *ctx, Type *type);
+
+static inline IrFunction *get_current_func(IrGenContext *ctx) {
+  return &ctx->module->functions[ctx->current_func_idx];
+}
+
+// The id of the aggregate with the layout of array `type`, added on first use; nested arrays are flattened.
+static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
+  assert(type_is_array(type) && "get_array_agg_id: type is not an array");
+
+  uint32_t count = 1;
+  Type *element = type;
+  while (type_is_array(element)) {
+    count *= element->array.count;
+    element = element->array.element;
+  }
+
+  // A bool occupies a single byte in memory, although it is an i32 in a register
+  IrType element_type = type_is_bool(element) ? IR_INT(1, false) : get_ir_type(ctx, element);
+
+  IrModule *module = ctx->module;
+  for (size_t i = 0; i < da_len(module->aggregates); i++) {
+    IrAggregate *agg = &module->aggregates[i];
+    if (da_len(agg->fields) == 1 && agg->fields[0].count == count &&
+        ir_type_equals(agg->fields[0].type, element_type)) {
+      return i;
+    }
+  }
+
+  char *name = arena_alloc(&ctx->comp_unit->arena, 16);
+  snprintf(name, 16, "agg%zu", da_len(module->aggregates));
+
+  IrAggregate agg = {.name = name, .alignment = element_type.size, .fields = NULL};
+  da_append(agg.fields, ((IrAggField){.type = element_type, .count = count}));
+  da_append(module->aggregates, agg);
+
+  return da_len(module->aggregates) - 1;
+}
+
+static IrType get_ir_type(IrGenContext *ctx, Type *type) {
   assert(type && "expression has no type; sema did not analyse it");
 
   switch (type->kind) {
@@ -35,8 +75,10 @@ static IrType get_ir_type(Type *type) {
     return IR_PTR;
 
   case TYPE_KIND_POINTER:
-  case TYPE_KIND_ARRAY:
     return IR_PTR;
+
+  case TYPE_KIND_ARRAY:
+    return IR_AGG(get_array_agg_id(ctx, type));
 
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
@@ -47,10 +89,6 @@ static IrType get_ir_type(Type *type) {
   return IR_I32;
 }
 
-static inline IrFunction *get_current_func(IrGenContext *ctx) {
-  return &ctx->module->functions[ctx->current_func_idx];
-}
-
 static IrReg next_ir_reg(IrGenContext *ctx, IrType type) {
   IrFunction *func = get_current_func(ctx);
   IrReg reg = (IrReg){.id = (ctx)->next_reg++};
@@ -59,7 +97,7 @@ static IrReg next_ir_reg(IrGenContext *ctx, IrType type) {
 }
 
 static IrReg next_reg(IrGenContext *ctx, Type *type) {
-  return next_ir_reg(ctx, get_ir_type(type));
+  return next_ir_reg(ctx, get_ir_type(ctx, type));
 }
 
 static IrLabel next_label(IrGenContext *ctx) {
@@ -138,15 +176,14 @@ static IrReg emit_scaled_offset(IrGenContext *ctx, IrReg index_reg, int64_t elem
   return bytes_reg;
 }
 
-// Reserves a stack slot of `size` bytes and returns its address. Slots live in the entry block, so a declaration inside
-// a loop does not allocate on every iteration.
-static IrReg queue_entry_alloc(IrGenContext *ctx, uint32_t size) {
-  IrReg slot_reg = next_ir_reg(ctx, IR_PTR);
+// Reserves an entry-block stack slot for a value of `type`; the address is typed as the aggregate if it is one.
+static IrReg queue_entry_alloc(IrGenContext *ctx, Type *type) {
+  IrReg slot_reg = next_ir_reg(ctx, type_is_aggregate(type) ? get_ir_type(ctx, type) : IR_PTR);
 
   IrInstr alloc_inst = {
     .op = IR_OP_ALLOC,
     .res = slot_reg,
-    .int_lit = size,
+    .int_lit = type->size,
   };
   da_append(ctx->entry_allocs, alloc_inst);
 
@@ -155,9 +192,9 @@ static IrReg queue_entry_alloc(IrGenContext *ctx, uint32_t size) {
 
 // IR op that converts a value of IR type `from` to IR type `to`.
 static IrOp conversion_op(IrType from, IrType to) {
-  // Pointers and i64 have the same representation; only the register's type changes.
-  bool from_wide = from.kind == IR_TYPE_PTR || (from.kind == IR_TYPE_INT && from.size == 8);
-  bool to_wide = to.kind == IR_TYPE_PTR || (to.kind == IR_TYPE_INT && to.size == 8);
+  // Pointers, aggregates (their address) and i64 have the same representation; only the register's type changes.
+  bool from_wide = from.kind == IR_TYPE_PTR || from.kind == IR_TYPE_AGG || (from.kind == IR_TYPE_INT && from.size == 8);
+  bool to_wide = to.kind == IR_TYPE_PTR || to.kind == IR_TYPE_AGG || (to.kind == IR_TYPE_INT && to.size == 8);
   if (from_wide && to_wide) return IR_OP_COPY;
 
   bool from_float = ir_type_is_float(from);
@@ -175,8 +212,8 @@ static IrOp conversion_op(IrType from, IrType to) {
 
 // Converts `src_reg` from `from_type` to `to_type`; the same IR type needs no instruction.
 static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
-  IrType from_ir = get_ir_type(from_type);
-  IrType to_ir = get_ir_type(to_type);
+  IrType from_ir = get_ir_type(ctx, from_type);
+  IrType to_ir = get_ir_type(ctx, to_type);
 
   if (ir_type_equals(from_ir, to_ir)) {
     return src_reg;
@@ -190,6 +227,24 @@ static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_ty
     .op = conversion_op(from_ir, to_ir),
     .res = res,
     .arg1 = src_reg,
+  };
+  emit_ir_inst(ctx, inst);
+
+  return res;
+}
+
+// Returns `reg` with the IR type `type`, copying it to a new register only when the type differs.
+static IrReg retype_reg(IrGenContext *ctx, IrReg reg, IrType type) {
+  if (ir_type_equals(get_current_func(ctx)->reg_types[reg.id], type)) {
+    return reg;
+  }
+
+  IrReg res = next_ir_reg(ctx, type);
+
+  IrInstr inst = {
+    .op = IR_OP_COPY,
+    .res = res,
+    .arg1 = reg,
   };
   emit_ir_inst(ctx, inst);
 
@@ -285,7 +340,7 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
 
   IrInstr inst = {.res = res};
 
-  if (ir_type_is_float(get_ir_type(type))) {
+  if (ir_type_is_float(get_ir_type(ctx, type))) {
     inst.op = IR_OP_LOAD_FLOAT;
     inst.float_lit = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
   } else {
@@ -336,14 +391,14 @@ static IrReg emit_identifier(IrGenContext *ctx, AstExpr *expr) {
   return reg;
 }
 
-// The address of `target[index]`.
-static IrReg emit_array_access(IrGenContext *ctx, AstExpr *target, AstExpr *index) {
+// The address of `target[index]`, whose register has the type `res_type`: the aggregate's type when the element is one.
+static IrReg emit_array_access(IrGenContext *ctx, AstExpr *target, AstExpr *index, IrType res_type) {
   IrReg target_reg = emit_expression(ctx, target);
   IrReg index_reg = emit_expression(ctx, index);
 
   int64_t element_size = expr_type(ctx, target)->array.element->size;
   IrReg offset_reg = emit_scaled_offset(ctx, index_reg, element_size);
-  IrReg res = next_ir_reg(ctx, IR_PTR);
+  IrReg res = next_ir_reg(ctx, res_type);
 
   IrInstr inst = {
     .op = IR_OP_ADD,
@@ -367,13 +422,13 @@ static IrReg emit_addr_of(IrGenContext *ctx, AstExpr *expr) {
   }
 
   if (operand->kind == AST_EXPR_SUBSCRIPT) {
-    return emit_array_access(ctx, operand->expr_subscript.target, operand->expr_subscript.index);
+    return emit_array_access(ctx, operand->expr_subscript.target, operand->expr_subscript.index, IR_PTR);
   }
 
   Symbol *sym = operand->expr_identifier.symbol;
   assert(sym->local.in_memory && "sema puts every variable whose address is taken in memory");
 
-  return get_symbol_reg(ctx, sym);
+  return retype_reg(ctx, get_symbol_reg(ctx, sym), IR_PTR);
 }
 
 // Loads the value `p.*` points to.
@@ -384,7 +439,7 @@ static IrReg emit_deref(IrGenContext *ctx, AstExpr *expr) {
   Type *type = expr_type(ctx, expr);
 
   if (type_is_aggregate(type)) {
-    return ptr_reg;
+    return retype_reg(ctx, ptr_reg, get_ir_type(ctx, type));
   }
 
   IrReg value_reg = next_reg(ctx, type);
@@ -405,7 +460,8 @@ static IrReg emit_subscript(IrGenContext *ctx, AstExpr *expr) {
 
   Type *type = expr_type(ctx, expr);
 
-  IrReg ptr_reg = emit_array_access(ctx, expr->expr_subscript.target, expr->expr_subscript.index);
+  IrType address_type = type_is_aggregate(type) ? get_ir_type(ctx, type) : IR_PTR;
+  IrReg ptr_reg = emit_array_access(ctx, expr->expr_subscript.target, expr->expr_subscript.index, address_type);
 
   if (type_is_aggregate(type)) {
     return ptr_reg;
@@ -436,7 +492,9 @@ static IrReg emit_call(IrGenContext *ctx, AstExpr *expr) {
     for (size_t i = 0; i < arg_count; i++) {
       AstExpr *arg_expr = expr->expr_call.arguments[i];
 
-      arg_regs[i] = emit_expression(ctx, arg_expr);
+      // The ABI type of an argument comes from its register, so an aggregate address has to be typed as the aggregate
+      IrReg arg_reg = emit_expression(ctx, arg_expr);
+      arg_regs[i] = retype_reg(ctx, arg_reg, get_ir_type(ctx, expr_type(ctx, arg_expr)));
     }
   }
 
@@ -632,48 +690,41 @@ static IrReg emit_cast(IrGenContext *ctx, AstExpr *expr) {
   return emit_cast_if_needed(ctx, value_reg, expr_type(ctx, operand), expr_type(ctx, expr));
 }
 
+// Writes `value_reg` of `type` to the address `ptr_reg`: an aggregate is copied, a scalar stored.
+static void emit_store(IrGenContext *ctx, IrReg value_reg, IrReg ptr_reg, Type *value_type) {
+  IrInstr inst = type_is_aggregate(value_type)
+                   ? (IrInstr){.op = IR_OP_MEMCPY, .arg1 = value_reg, .arg2 = ptr_reg, .int_lit = value_type->size}
+                   : (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = ptr_reg};
+  emit_ir_inst(ctx, inst);
+}
+
 // Stores or copies the value into the target (a register, a slot, a dereference or an element) and yields the value.
 static IrReg emit_assignment(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_assignment: expr is NULL");
 
   AstExpr *target = expr->expr_assign.target;
+  Symbol *target_sym = NULL;
+  IrReg target_reg;
 
   if (target->kind == AST_EXPR_DEREF) {
-    IrReg ptr_reg = emit_expression(ctx, target->expr_deref.operand);
-    IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
-
-    IrInstr inst = {
-      .op = IR_OP_STORE,
-      .arg1 = value_reg,
-      .arg2 = ptr_reg,
-    };
-    emit_ir_inst(ctx, inst);
-
-    return value_reg;
+    target_reg = emit_expression(ctx, target->expr_deref.operand);
+  } else if (target->kind == AST_EXPR_SUBSCRIPT) {
+    target_reg = emit_array_access(ctx, target->expr_subscript.target, target->expr_subscript.index, IR_PTR);
+  } else {
+    target_sym = target->expr_identifier.symbol;
+    target_reg = get_symbol_reg(ctx, target_sym);
   }
-
-  if (target->kind == AST_EXPR_SUBSCRIPT) {
-    IrReg ptr_reg = emit_array_access(ctx, target->expr_subscript.target, target->expr_subscript.index);
-    IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
-
-    IrInstr inst = {
-      .op = IR_OP_STORE,
-      .arg1 = value_reg,
-      .arg2 = ptr_reg,
-    };
-    emit_ir_inst(ctx, inst);
-
-    return value_reg;
-  }
-
-  Symbol *target_sym = target->expr_identifier.symbol;
-  IrReg target_reg = get_symbol_reg(ctx, target_sym);
 
   IrReg value_reg = emit_expression(ctx, expr->expr_assign.value);
 
-  IrInstr inst = target_sym->local.in_memory ? (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = target_reg}
-                                             : (IrInstr){.op = IR_OP_COPY, .res = target_reg, .arg1 = value_reg};
-  emit_ir_inst(ctx, inst);
+  bool in_register = target_sym && !target_sym->local.in_memory && !type_is_aggregate(target_sym->type);
+
+  if (in_register) {
+    IrInstr inst = {.op = IR_OP_COPY, .res = target_reg, .arg1 = value_reg};
+    emit_ir_inst(ctx, inst);
+  } else {
+    emit_store(ctx, value_reg, target_reg, expr_type(ctx, target));
+  }
 
   return value_reg;
 }
@@ -743,13 +794,12 @@ static void emit_stmt_expression(IrGenContext *ctx, AstStmt *stmt) {
   emit_expression(ctx, stmt->stmt_expression.expression);
 }
 
-// Declares a variable: a register, or a slot when it lives in memory. Without an initializer a scalar is zeroed and an
-// aggregate is left uninitialized.
+// Declares a variable in a register or a memory slot; without an initializer a scalar is zeroed.
 static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_local_var: stmt is NULL");
 
   Symbol *sym = stmt->stmt_local_var.symbol;
-  IrReg reg = sym->local.in_memory ? queue_entry_alloc(ctx, sym->type->size) : next_reg(ctx, sym->type);
+  IrReg reg = sym->local.in_memory ? queue_entry_alloc(ctx, sym->type) : next_reg(ctx, sym->type);
 
   bind_symbol_reg(ctx, sym, reg);
 
@@ -764,7 +814,7 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
     init_reg = next_reg(ctx, sym->type);
     IrInstr zero_inst = {.res = init_reg};
 
-    if (ir_type_is_float(get_ir_type(sym->type))) {
+    if (ir_type_is_float(get_ir_type(ctx, sym->type))) {
       zero_inst.op = IR_OP_LOAD_FLOAT;
       zero_inst.float_lit = 0.0;
     } else {
@@ -776,12 +826,7 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
   }
 
   if (sym->local.in_memory) {
-    IrInstr inst = {
-      .op = IR_OP_STORE,
-      .arg1 = init_reg,
-      .arg2 = reg,
-    };
-    emit_ir_inst(ctx, inst);
+    emit_store(ctx, init_reg, reg, sym->type);
 
     return;
   }
@@ -987,7 +1032,7 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
 
   IrFunction new_func = {
     .name = func_decl->name,
-    .return_type = get_ir_type(return_type),
+    .return_type = get_ir_type(ctx, return_type),
     .params = NULL,
     .param_count = func_decl->param_count,
     .buffer = NULL,
@@ -1008,19 +1053,16 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
 
     for (size_t i = 0; i < param_count; i++) {
       Symbol *sym = func_decl->params[i].symbol;
-
-      func->params[i] = next_reg(ctx, sym->type);
+      IrReg param_reg = next_reg(ctx, sym->type);
+      IrReg slot_reg = param_reg;
 
       if (sym->local.in_memory) {
-        IrReg slot_reg = queue_entry_alloc(ctx, sym->type->size);
-
-        IrInstr spill_inst = {.op = IR_OP_STORE, .arg1 = func->params[i], .arg2 = slot_reg};
-        emit_ir_inst(ctx, spill_inst);
-
-        bind_symbol_reg(ctx, sym, slot_reg);
-      } else {
-        bind_symbol_reg(ctx, sym, func->params[i]);
+        slot_reg = queue_entry_alloc(ctx, sym->type);
+        emit_store(ctx, param_reg, slot_reg, sym->type);
       }
+
+      func->params[i] = param_reg;
+      bind_symbol_reg(ctx, sym, slot_reg);
     }
   }
 
@@ -1083,6 +1125,11 @@ void gen_ir_free(IrGenContext *ctx) {
     da_free(func->reg_types);
   }
 
+  for (size_t i = 0; i < da_len(ctx->module->aggregates); i++) {
+    da_free(ctx->module->aggregates[i].fields);
+  }
+
+  da_free(ctx->module->aggregates);
   da_free(ctx->module->functions);
   da_free(ctx->symbol_to_reg);
   da_free(ctx->entry_allocs);
@@ -1095,6 +1142,7 @@ void gen_ir(IrGenContext *ctx, AstProgram *program) {
 
   IrModule *module = arena_alloc(&ctx->comp_unit->arena, sizeof(IrModule));
   module->functions = NULL;
+  module->aggregates = NULL;
   ctx->module = module;
 
   for (size_t i = 0; i < program->decl_count; i++) {

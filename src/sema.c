@@ -395,28 +395,30 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     return type_error;
   }
 
-  Symbol *sym = scope_lookup(ctx, callee->expr_identifier.name);
+  Symbol *func_sym = scope_lookup(ctx, callee->expr_identifier.name);
 
-  if (!sym) {
+  if (!func_sym) {
     sema_error(ctx, expr->loc, "Undefined function '%s'", callee->expr_identifier.name);
     sema_call_arguments(ctx, expr);
     return type_error;
   }
 
-  if (sym->kind != SYMBOL_FUNCTION) {
+  if (func_sym->kind != SYMBOL_FUNCTION) {
     sema_error(ctx, expr->loc, "Expected function, got %s", callee->expr_identifier.name);
     sema_call_arguments(ctx, expr);
     return type_error;
   }
 
-  TypeFunction *func_type = &sym->type->function;
+  callee->expr_identifier.symbol = func_sym;
+
+  TypeFunction *func_type = &func_sym->type->function;
 
   if (expr->expr_call.argument_count != func_type->param_count) {
     sema_error(ctx,
                expr->loc,
                "Function '%s' expects %zu arguments, but %zu were provided",
                callee->expr_identifier.name,
-               sym->type->function.param_count,
+               func_type->param_count,
                expr->expr_call.argument_count);
     sema_call_arguments(ctx, expr);
     return type_error;
@@ -770,12 +772,6 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
     }
   }
 
-  if (type_is_array(target_type)) {
-    sema_error(
-      ctx, expr->loc, "Cannot assign to an array of type '%s'; arrays cannot be copied yet", target_type->name);
-    return type_error;
-  }
-
   if (!type_can_widen_to(value_type, target_type)) {
     sema_error(ctx, expr->loc, "Cannot assign '%s' to '%s'", value_type->name, target_type->name);
     return type_error;
@@ -884,12 +880,6 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
 
   if (!type_has_storage(var_type)) {
     sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type '%s'", stmt->stmt_local_var.name, var_type->name);
-    var_type = type_error;
-  }
-
-  if (stmt->stmt_local_var.init && type_is_array(var_type)) {
-    sema_error(
-      ctx, stmt->loc, "Cannot initialize array '%s' with a value; arrays cannot be copied", stmt->stmt_local_var.name);
     var_type = type_error;
   }
 
@@ -1023,15 +1013,6 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
 
   Type *return_type = sema_type(ctx, func_decl->declared_return_type);
 
-  if (type_is_array(return_type)) {
-    sema_error(ctx,
-               decl->loc,
-               "Function '%s' cannot return array type '%s'; arrays cannot be copied",
-               func_decl->name,
-               return_type->name);
-    return_type = type_error;
-  }
-
   Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * func_decl->param_count);
   for (size_t i = 0; i < func_decl->param_count; i++) {
     param_types[i] = sema_type(ctx, func_decl->params[i].declared_type);
@@ -1040,13 +1021,6 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
       sema_error(ctx,
                  func_decl->params[i].loc,
                  "Cannot declare parameter '%s' of type '%s'",
-                 func_decl->params[i].name,
-                 param_types[i]->name);
-      param_types[i] = type_error;
-    } else if (type_is_array(param_types[i])) {
-      sema_error(ctx,
-                 func_decl->params[i].loc,
-                 "Cannot declare parameter '%s' of array type '%s'; arrays cannot be copied",
                  func_decl->params[i].name,
                  param_types[i]->name);
       param_types[i] = type_error;
@@ -1107,14 +1081,14 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
 
   for (uint32_t i = 0; i < func_decl->param_count; i++) {
     AstParam *param = &func_decl->params[i];
-    Type *type = func_type->function.param_types[i];
+    Type *param_type = func_type->function.param_types[i];
 
     if (sema_reject_type_name(ctx, param->name, param->loc)) {
       scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, type_error, param->loc);
       continue;
     }
 
-    Symbol *sym = scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, type, param->loc);
+    Symbol *sym = scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, param_type, param->loc);
 
     if (!sym) {
       sema_error(ctx, param->loc, "Redeclaration of parameter '%s' in function '%s'", param->name, func_decl->name);
@@ -1123,6 +1097,11 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
 
     sym->is_defined = true;
     sym->local.is_param = true;
+
+    if (type_is_aggregate(param_type)) {
+      sym->local.in_memory = true;
+    }
+
     param->symbol = sym;
   }
 

@@ -1,15 +1,17 @@
-fn fib(n: i32): i32 {
-  if n <= 1 {
-    return n;
-  }
-  return fib(n - 1) + fib(n - 2);
-}
-
-fn main(): i64 {
+fn make_array(): [5]i64 {
   var xs: [5]i64;
 
   xs[0] = 1;
-  xs[2] = 7;
+  xs[2] = 5;
+  xs[4] = 4;
 
-  return fib(xs[2] as i32); # 13
+  return xs;
+}
+
+fn main(): i64 {
+  var xs: [5]i64 = make_array();
+
+  xs[1] = 9;
+
+  return xs[2];
 }
