@@ -15,36 +15,36 @@ static IrType get_ir_type(Type *type) {
 
   switch (type->kind) {
   case TYPE_KIND_I32:
-    return IR_TYPE_I32;
+    return IR_I32;
   case TYPE_KIND_I64:
-    return IR_TYPE_I64;
+    return IR_I64;
 
   case TYPE_KIND_F32:
-    return IR_TYPE_F32;
+    return IR_F32;
   case TYPE_KIND_F64:
-    return IR_TYPE_F64;
+    return IR_F64;
 
   case TYPE_KIND_BOOL:
-    return IR_TYPE_I32;
+    return IR_I32;
 
   case TYPE_KIND_UNTYPED_INT:
-    return IR_TYPE_I32;
+    return IR_I32;
   case TYPE_KIND_UNTYPED_FLOAT:
-    return IR_TYPE_F64;
+    return IR_F64;
   case TYPE_KIND_UNTYPED_NULL:
-    return IR_TYPE_PTR;
+    return IR_PTR;
 
   case TYPE_KIND_POINTER:
   case TYPE_KIND_ARRAY:
-    return IR_TYPE_PTR;
+    return IR_PTR;
 
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
   case TYPE_KIND_FUNCTION:
-    return IR_TYPE_NONE;
+    return IR_VOID;
   }
 
-  return IR_TYPE_I32;
+  return IR_I32;
 }
 
 static inline IrFunction *get_current_func(IrGenContext *ctx) {
@@ -124,8 +124,8 @@ static IrReg emit_scaled_offset(IrGenContext *ctx, IrReg index_reg, int64_t elem
     return index_reg;
   }
 
-  IrReg size_reg = emit_int_const(ctx, element_size, IR_TYPE_I64);
-  IrReg bytes_reg = next_ir_reg(ctx, IR_TYPE_I64);
+  IrReg size_reg = emit_int_const(ctx, element_size, IR_I64);
+  IrReg bytes_reg = next_ir_reg(ctx, IR_I64);
 
   IrInstr mul_inst = {
     .op = IR_OP_MUL,
@@ -141,7 +141,7 @@ static IrReg emit_scaled_offset(IrGenContext *ctx, IrReg index_reg, int64_t elem
 // Reserves a stack slot of `size` bytes and returns its address. Slots live in the entry block, so a declaration inside
 // a loop does not allocate on every iteration.
 static IrReg queue_entry_alloc(IrGenContext *ctx, uint32_t size) {
-  IrReg slot_reg = next_ir_reg(ctx, IR_TYPE_PTR);
+  IrReg slot_reg = next_ir_reg(ctx, IR_PTR);
 
   IrInstr alloc_inst = {
     .op = IR_OP_ALLOC,
@@ -153,23 +153,23 @@ static IrReg queue_entry_alloc(IrGenContext *ctx, uint32_t size) {
   return slot_reg;
 }
 
-static inline bool ir_type_is_float(IrType type) {
-  return type == IR_TYPE_F32 || type == IR_TYPE_F64;
-}
-
 // IR op that converts a value of IR type `from` to IR type `to`.
 static IrOp conversion_op(IrType from, IrType to) {
   // Pointers and i64 have the same representation; only the register's type changes.
-  bool from_wide = from == IR_TYPE_I64 || from == IR_TYPE_PTR;
-  bool to_wide = to == IR_TYPE_I64 || to == IR_TYPE_PTR;
+  bool from_wide = from.kind == IR_TYPE_PTR || (from.kind == IR_TYPE_INT && from.size == 8);
+  bool to_wide = to.kind == IR_TYPE_PTR || (to.kind == IR_TYPE_INT && to.size == 8);
   if (from_wide && to_wide) return IR_OP_COPY;
 
   bool from_float = ir_type_is_float(from);
   bool to_float = ir_type_is_float(to);
 
-  if (!from_float && !to_float) return from == IR_TYPE_I32 ? IR_OP_SEXT : IR_OP_TRUNC;
+  if (!from_float && !to_float) {
+    if (from.size >= to.size) return IR_OP_TRUNC;
+    return from.is_signed ? IR_OP_SEXT : IR_OP_ZEXT;
+  }
+
   if (!from_float) return IR_OP_ITOF;
-  if (to_float) return from == IR_TYPE_F32 ? IR_OP_FEXT : IR_OP_FTRUNC;
+  if (to_float) return from.size < to.size ? IR_OP_FEXT : IR_OP_FTRUNC;
   return IR_OP_FTOI;
 }
 
@@ -178,11 +178,11 @@ static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_ty
   IrType from_ir = get_ir_type(from_type);
   IrType to_ir = get_ir_type(to_type);
 
-  if (from_ir == to_ir) {
+  if (ir_type_equals(from_ir, to_ir)) {
     return src_reg;
   }
 
-  assert(from_ir != IR_TYPE_NONE && to_ir != IR_TYPE_NONE && "cast between non-value types");
+  assert(!ir_type_is_void(from_ir) && !ir_type_is_void(to_ir) && "cast between non-value types");
 
   IrReg res = next_reg(ctx, to_type);
 
@@ -343,7 +343,7 @@ static IrReg emit_array_access(IrGenContext *ctx, AstExpr *target, AstExpr *inde
 
   int64_t element_size = expr_type(ctx, target)->array.element->size;
   IrReg offset_reg = emit_scaled_offset(ctx, index_reg, element_size);
-  IrReg res = next_ir_reg(ctx, IR_TYPE_PTR);
+  IrReg res = next_ir_reg(ctx, IR_PTR);
 
   IrInstr inst = {
     .op = IR_OP_ADD,
@@ -381,7 +381,13 @@ static IrReg emit_deref(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_deref: expr is NULL");
 
   IrReg ptr_reg = emit_expression(ctx, expr->expr_deref.operand);
-  IrReg value_reg = next_reg(ctx, expr_type(ctx, expr));
+  Type *type = expr_type(ctx, expr);
+
+  if (type_is_aggregate(type)) {
+    return ptr_reg;
+  }
+
+  IrReg value_reg = next_reg(ctx, type);
 
   IrInstr inst = {
     .op = IR_OP_LOAD,
@@ -482,7 +488,7 @@ static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *expr) {
   int64_t element_size = ptr_type->pointer.base->size;
 
   if (type_is_pointer(left_type) && type_is_pointer(right_type)) {
-    IrReg bytes_reg = next_ir_reg(ctx, IR_TYPE_I64);
+    IrReg bytes_reg = next_ir_reg(ctx, IR_I64);
 
     IrInstr sub_inst = {
       .op = IR_OP_SUB,
@@ -496,8 +502,8 @@ static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *expr) {
       return bytes_reg;
     }
 
-    IrReg size_reg = emit_int_const(ctx, element_size, IR_TYPE_I64);
-    IrReg count_reg = next_ir_reg(ctx, IR_TYPE_I64);
+    IrReg size_reg = emit_int_const(ctx, element_size, IR_I64);
+    IrReg count_reg = next_ir_reg(ctx, IR_I64);
 
     IrInstr div_inst = {
       .op = IR_OP_DIV,
@@ -515,7 +521,7 @@ static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *expr) {
 
   offset_reg = emit_scaled_offset(ctx, offset_reg, element_size);
 
-  IrReg res = next_ir_reg(ctx, IR_TYPE_PTR);
+  IrReg res = next_ir_reg(ctx, IR_PTR);
 
   IrInstr inst = {.op = get_binary_ir_op(expr->expr_binary.op), .res = res, .arg1 = ptr_reg, .arg2 = offset_reg};
   emit_ir_inst(ctx, inst);
@@ -988,7 +994,7 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
     .reg_types = NULL,
   };
 
-  da_append(new_func.reg_types, IR_TYPE_NONE);
+  da_append(new_func.reg_types, IR_VOID);
   da_append(ctx->module->functions, new_func);
 
   ctx->current_func_idx = da_len(ctx->module->functions) - 1;

@@ -4,7 +4,7 @@
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "Usage: %s <input.axe> [output.ssa]\n", argv[0]);
+    fprintf(stderr, "Usage: %s <input.mh> [output.ssa]\n", argv[0]);
     return 2;
   }
 

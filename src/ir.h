@@ -21,6 +21,7 @@ typedef enum {
   // Unary arithmetic and logic
   IR_OP_NEGATE,
   IR_OP_NOT,
+  IR_OP_BIT_NOT,
 
   // Binary arithmetic
   IR_OP_ADD,
@@ -37,7 +38,6 @@ typedef enum {
   IR_OP_CMP_GE,
 
   // Bitwise operations
-  IR_OP_BIT_NOT,
   IR_OP_BIT_OR,
   IR_OP_BIT_XOR,
   IR_OP_BIT_AND,
@@ -67,16 +67,6 @@ typedef enum {
   IR_OP_CALL,
   IR_OP_RETURN,
 } IrOp;
-
-typedef enum {
-  IR_TYPE_NONE = 0,
-
-  IR_TYPE_I32,
-  IR_TYPE_I64,
-  IR_TYPE_F32,
-  IR_TYPE_F64,
-  IR_TYPE_PTR,
-} IrType;
 
 typedef struct {
   uint32_t id;
@@ -114,6 +104,48 @@ typedef struct {
   };
 } IrInstr;
 
+typedef enum {
+  IR_TYPE_NONE = 0,
+
+  IR_TYPE_INT,
+  IR_TYPE_FLOAT,
+  IR_TYPE_PTR,
+  IR_TYPE_AGG,
+} IrTypeKind;
+
+typedef struct {
+  IrTypeKind kind;
+  uint32_t size;   // In bytes. INT: 1, 2, 4 or 8. FLOAT: 4 or 8. PTR: 8. Unused for AGG.
+  bool is_signed;  // INT only
+  uint32_t agg_id; // AGG only: the index into IrModule.aggregates
+} IrType;
+
+// Constructors for the types
+#define IR_VOID ((IrType){0})
+
+#define IR_INT(bytes, sign) ((IrType){.kind = IR_TYPE_INT, .size = (bytes), .is_signed = (sign)})
+#define IR_FLOAT(bytes) ((IrType){.kind = IR_TYPE_FLOAT, .size = (bytes)})
+#define IR_PTR ((IrType){.kind = IR_TYPE_PTR, .size = 8})
+#define IR_AGG(id) ((IrType){.kind = IR_TYPE_AGG, .agg_id = (id)})
+
+#define IR_I32 IR_INT(4, true)
+#define IR_I64 IR_INT(8, true)
+#define IR_F32 IR_FLOAT(4)
+#define IR_F64 IR_FLOAT(8)
+
+// An array is a single field; a struct has one field per member.
+typedef struct {
+  IrType type;
+  uint32_t count;
+} IrAggField;
+
+// An aggregate type, emitted as a QBE `type :name = align N { ... }`.
+typedef struct {
+  const char *name;
+  uint32_t alignment;
+  IrAggField *fields;
+} IrAggregate;
+
 typedef struct {
   const char *name;
   IrType return_type;
@@ -122,11 +154,26 @@ typedef struct {
   uint32_t param_count;
 
   IrInstr *buffer;
-  IrType *reg_types;
+  IrType *reg_types; // Indexed by register id; entry 0 is unused
 } IrFunction;
 
 typedef struct {
   IrFunction *functions;
+  IrAggregate *aggregates;
 } IrModule;
+
+// Type helpers
+
+static inline bool ir_type_is_void(IrType type) {
+  return type.kind == IR_TYPE_NONE;
+}
+
+static inline bool ir_type_is_float(IrType type) {
+  return type.kind == IR_TYPE_FLOAT;
+}
+
+static inline bool ir_type_equals(IrType a, IrType b) {
+  return a.kind == b.kind && a.size == b.size && a.is_signed == b.is_signed && a.agg_id == b.agg_id;
+}
 
 #endif // IR_H
