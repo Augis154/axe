@@ -97,7 +97,7 @@ bool type_equals(Type *a, Type *b) {
   }
 
   if (type_is_array(a) && type_is_array(b)) {
-    return a->array.count == b->array.count && type_equals(a->array.elem_type, b->array.elem_type);
+    return a->array.length == b->array.length && type_equals(a->array.elem_type, b->array.elem_type);
   }
 
   return false;
@@ -178,17 +178,17 @@ Type *type_pointer_to(Arena *arena, Type *base_type) {
   return ptr_type;
 }
 
-Type *type_array_of(Arena *arena, Type *elem_type, size_t count) {
+Type *type_array_of(Arena *arena, Type *elem_type, size_t length) {
   size_t name_len = strlen(elem_type->name) + 16;
   char *name = arena_alloc(arena, name_len);
-  snprintf(name, name_len, "[%zu]%s", count, elem_type->name);
+  snprintf(name, name_len, "[%zu]%s", length, elem_type->name);
 
   Type *array_type = arena_alloc(arena, sizeof(Type));
   *array_type = (Type){
     .kind = TYPE_KIND_ARRAY,
     .name = name,
-    .size = elem_type->size * count,
-    .array = {.elem_type = elem_type, .count = count},
+    .size = elem_type->size * length,
+    .array = {.elem_type = elem_type, .length = length},
   };
 
   return array_type;

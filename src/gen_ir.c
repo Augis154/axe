@@ -24,7 +24,7 @@ static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
   uint32_t count = 1;
   Type *element = type;
   while (type_is_array(element)) {
-    count *= element->array.count;
+    count *= element->array.length;
     element = element->array.elem_type;
   }
 
@@ -142,6 +142,8 @@ static void emit_ir_inst(IrGenContext *ctx, IrInstr inst) {
     ctx->block_terminated = true;
   }
 }
+
+#define emit_ir_instr(ctx, instr, ...) emit_ir_inst(ctx, (IrInstr){.op = (instr), __VA_ARGS__})
 
 static IrReg emit_int_const(IrGenContext *ctx, int64_t value, IrType type) {
   IrReg reg = next_ir_reg(ctx, type);
@@ -400,6 +402,38 @@ static IrReg emit_identifier(IrGenContext *ctx, AstExpr *expr) {
   return reg;
 }
 
+// Stores `value_reg` into `count` consecutive elements at `base_reg`; `count` must be at least 1.
+static void emit_fill(IrGenContext *ctx, IrReg base_reg, IrReg value_reg, Type *elem_type, uint32_t count) {
+  uint32_t elem_size = elem_type->size;
+
+  IrReg size_reg = emit_int_const(ctx, elem_size, IR_I64);
+  IrReg total_reg = emit_int_const(ctx, (int64_t)count * elem_size, IR_I64);
+
+  // The count is at least 1, so the loop is tested at the bottom
+  IrReg end_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_ADD, .res = end_reg, .arg1 = base_reg, .arg2 = total_reg);
+
+  IrReg ptr_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = base_reg);
+
+  IrLabel loop_start = next_label(ctx);
+  IrLabel loop_end = next_label(ctx);
+
+  emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_start);
+  emit_store(ctx, value_reg, ptr_reg, elem_type);
+
+  // ptr += elem_size, repeating while ptr < end
+  IrReg next_ptr = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_ADD, .res = next_ptr, .arg1 = ptr_reg, .arg2 = size_reg);
+  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = next_ptr);
+
+  IrReg cond = next_ir_reg(ctx, IR_I32);
+  emit_ir_instr(ctx, IR_OP_CMP_LT, .res = cond, .arg1 = ptr_reg, .arg2 = end_reg);
+  emit_ir_instr(ctx, IR_OP_JNZ, .arg1 = cond, .target_true = loop_start, .target_false = loop_end);
+
+  emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_end);
+}
+
 // Builds `[a, b, ...]` in a new stack slot, storing each element at its offset, and yields the slot's address.
 static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
   Type *arr_type = expr_type(ctx, expr);
@@ -408,8 +442,17 @@ static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
 
   IrReg arr_ptr = queue_entry_alloc(ctx, arr_type);
 
+  if (expr->expr_array_literal.is_repeat) {
+    uint32_t length = arr_type->array.length;
+
+    IrReg val_reg = emit_expression(ctx, expr->expr_array_literal.repeat.value);
+    emit_fill(ctx, arr_ptr, val_reg, elem_type, length);
+
+    return arr_ptr;
+  }
+
   for (uint32_t i = 0; i < expr->expr_array_literal.list.element_count; i++) {
-    IrReg val = emit_expression(ctx, expr->expr_array_literal.list.elements[i].value);
+    IrReg val_reg = emit_expression(ctx, expr->expr_array_literal.list.elements[i].value);
 
     size_t offset = (size_t)i * elem_size;
     IrReg elem_addr = arr_ptr;
@@ -427,7 +470,7 @@ static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
       emit_ir_inst(ctx, off_inst);
     }
 
-    emit_store(ctx, val, elem_addr, elem_type);
+    emit_store(ctx, val_reg, elem_addr, elem_type);
   }
 
   return arr_ptr;

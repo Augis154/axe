@@ -79,7 +79,7 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
       printf("(repeat ");
       debug_print_ast_sexpr(arena, expr->expr_array_literal.repeat.value);
       printf(" ");
-      debug_print_ast_sexpr(arena, expr->expr_array_literal.repeat.count_expr);
+      debug_print_ast_sexpr(arena, expr->expr_array_literal.repeat.length_expr);
       printf(")");
     } else {
       printf("(list ");

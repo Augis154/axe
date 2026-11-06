@@ -120,7 +120,7 @@ typedef struct {
     // Repeat syntax: [0; 256]
     struct {
       AstExpr *value;
-      AstExpr *count_expr;
+      AstExpr *length_expr;
     } repeat;
   };
 } AstExprArrayLiteral;

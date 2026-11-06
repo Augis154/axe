@@ -314,33 +314,69 @@ static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   return sym->type;
 }
 
-// Types `[a, b, ...]`: elements convert to the element type of `hint`, or to their common type without one.
+// The slot of the value for element `i`; a repeat literal has a single value shared by every element.
+static AstExpr **array_literal_value_slot(AstExpr *expr, uint32_t i) {
+  return expr->expr_array_literal.is_repeat ? &expr->expr_array_literal.repeat.value
+                                            : &expr->expr_array_literal.list.elements[i].value;
+}
+
+// Converts a literal value of `type` to `elem_type`
+static bool sema_literal_value_coerce(SemaContext *ctx, AstExpr **slot, Type *type, Type *elem_type, uint32_t i) {
+  if (type == type_error) {
+    return false;
+  }
+
+  if (!type_can_widen_to(type, elem_type)) {
+    sema_error(
+      ctx, (*slot)->loc, "Array element %u of type '%s' cannot convert to '%s'", i, type->name, elem_type->name);
+    return false;
+  }
+
+  sema_coerce(ctx, slot, elem_type);
+  return true;
+}
+
+// Types `[a, b, ...]` and `[value; length]`: values convert to the element type of `hint`, or to their common type.
 static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint) {
-  if (expr->expr_array_literal.is_repeat) {
-    sema_error(ctx, expr->loc, "Repeat array literals are not yet supported");
-    return type_error;
+  bool is_repeat = expr->expr_array_literal.is_repeat;
+  int64_t length;
+
+  if (is_repeat) {
+    AstExpr *length_expr = expr->expr_array_literal.repeat.length_expr;
+
+    if (length_expr->kind != AST_EXPR_LITERAL || length_expr->expr_literal.kind != AST_LITERAL_INT) {
+      sema_error(ctx, length_expr->loc, "Array repeat length must be an integer literal");
+      return type_error;
+    }
+
+    length = length_expr->expr_literal.int_value;
+    if (length <= 0) {
+      sema_error(ctx, length_expr->loc, "Array size must be greater than zero");
+      return type_error;
+    }
+  } else {
+    if (expr->expr_array_literal.list.is_sparse) {
+      sema_error(ctx, expr->loc, "Sparse array literals are not yet supported");
+      return type_error;
+    }
+
+    length = expr->expr_array_literal.list.element_count;
+    if (length == 0) {
+      sema_error(ctx, expr->loc, "An array literal needs at least one element");
+      return type_error;
+    }
   }
 
-  if (expr->expr_array_literal.list.is_sparse) {
-    sema_error(ctx, expr->loc, "Sparse array literals are not yet supported");
-    return type_error;
-  }
-
-  AstArrayElement *elements = expr->expr_array_literal.list.elements;
-  uint32_t count = expr->expr_array_literal.list.element_count;
-  if (count == 0) {
-    sema_error(ctx, expr->loc, "An array literal needs at least one element");
-    return type_error;
-  }
-
-  Type *element_type = NULL;
+  uint32_t value_count = is_repeat ? 1 : (uint32_t)length;
 
   if (hint == type_error) {
-    for (uint32_t i = 0; i < count; i++) {
-      sema_expr(ctx, elements[i].value);
+    for (uint32_t i = 0; i < value_count; i++) {
+      sema_expr(ctx, *array_literal_value_slot(expr, i));
     }
     return type_error;
   }
+
+  Type *elem_type = NULL;
 
   if (hint) {
     if (!type_is_array(hint)) {
@@ -348,63 +384,52 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
       return type_error;
     }
 
-    if (count != hint->array.count) {
-      sema_error(
-        ctx, expr->loc, "Array literal has %u elements, but '%s' has %zu", count, hint->name, hint->array.count);
+    if ((size_t)length != hint->array.length) {
+      sema_error(ctx,
+                 expr->loc,
+                 "Array literal has %lld elements, but '%s' has %zu",
+                 (long long)length,
+                 hint->name,
+                 hint->array.length);
       return type_error;
     }
 
-    element_type = hint->array.elem_type;
+    elem_type = hint->array.elem_type;
   } else {
-    for (uint32_t i = 0; i < count; i++) {
-      Type *type = sema_expr(ctx, elements[i].value);
+    // Without a hint the element type is the common type of the values
+    for (uint32_t i = 0; i < value_count; i++) {
+      AstExpr *value = *array_literal_value_slot(expr, i);
+      Type *type = sema_expr(ctx, value);
       if (type == type_error) {
         return type_error;
       }
 
-      Type *common = !element_type || type_equals(element_type, type) ? type : type_common(element_type, type);
+      Type *common = !elem_type || type_equals(elem_type, type) ? type : type_common(elem_type, type);
       if (!common) {
-        sema_error(ctx,
-                   elements[i].value->loc,
-                   "Array element %u of type '%s' does not match '%s'",
-                   i,
-                   type->name,
-                   element_type->name);
+        sema_error(
+          ctx, value->loc, "Array element %u of type '%s' does not match '%s'", i, type->name, elem_type->name);
         return type_error;
       }
 
-      element_type = common;
+      elem_type = common;
     }
 
-    element_type = type_default(element_type);
+    elem_type = type_default(elem_type);
   }
 
-  bool elements_ok = true;
+  bool values_ok = true;
 
-  for (uint32_t i = 0; i < count; i++) {
-    AstExpr *value = elements[i].value;
-    Type *type = hint ? sema_expr_hint(ctx, value, element_type) : sema_expr_type(ctx, value);
-
-    if (type == type_error) {
-      elements_ok = false;
-      continue;
-    }
-
-    if (!type_can_widen_to(type, element_type)) {
-      sema_error(
-        ctx, value->loc, "Array element %u of type '%s' cannot convert to '%s'", i, type->name, element_type->name);
-      elements_ok = false;
-      continue;
-    }
-
-    sema_coerce(ctx, &elements[i].value, element_type);
+  for (uint32_t i = 0; i < value_count; i++) {
+    AstExpr **slot = array_literal_value_slot(expr, i);
+    Type *type = hint ? sema_expr_hint(ctx, *slot, elem_type) : sema_expr_type(ctx, *slot);
+    values_ok &= sema_literal_value_coerce(ctx, slot, type, elem_type, i);
   }
 
-  if (!elements_ok) {
+  if (!values_ok) {
     return type_error;
   }
 
-  return hint ? hint : type_array_of(&ctx->comp_unit->arena, element_type, count);
+  return hint ? hint : type_array_of(&ctx->comp_unit->arena, elem_type, length);
 }
 
 // Types `&x`: an lvalue operand, giving a pointer to it. A variable whose address is taken lives in memory.
@@ -989,11 +1014,17 @@ static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *
   bool is_plain_list = initializer->kind == AST_EXPR_ARRAY_LITERAL && !initializer->expr_array_literal.is_repeat &&
                        !initializer->expr_array_literal.list.is_sparse;
 
+  bool is_repeat_literal = initializer->kind == AST_EXPR_ARRAY_LITERAL && initializer->expr_array_literal.is_repeat;
+  AstExpr *repeat_length = is_repeat_literal ? initializer->expr_array_literal.repeat.length_expr : NULL;
+
   if (elem_type == type_error) {
     array_type = type_error;
   } else if (is_plain_list) {
-    uint32_t elem_count = initializer->expr_array_literal.list.element_count;
-    array_type = elem_count > 0 ? type_array_of(&ctx->comp_unit->arena, elem_type, elem_count) : type_error;
+    uint32_t length = initializer->expr_array_literal.list.element_count;
+    array_type = length > 0 ? type_array_of(&ctx->comp_unit->arena, elem_type, length) : type_error;
+  } else if (is_repeat_literal && repeat_length->kind == AST_EXPR_LITERAL &&
+             repeat_length->expr_literal.kind == AST_LITERAL_INT && repeat_length->expr_literal.int_value > 0) {
+    array_type = type_array_of(&ctx->comp_unit->arena, elem_type, repeat_length->expr_literal.int_value);
   }
 
   Type *init_type = sema_expr_hint(ctx, initializer, array_type);
@@ -1011,7 +1042,7 @@ static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *
     return type_error;
   }
 
-  return type_array_of(&ctx->comp_unit->arena, elem_type, init_type->array.count);
+  return type_array_of(&ctx->comp_unit->arena, elem_type, init_type->array.length);
 }
 
 // Resolves a local variable's annotation (NULL if none) and analyses the initializer against it.

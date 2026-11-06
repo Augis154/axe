@@ -355,7 +355,7 @@ static AstExpr *parse_array_literal(Parser *parser) {
   if (match(parser, TOKEN_SEMICOLON)) {
     array_literal_expr->expr_array_literal.is_repeat = true;
     array_literal_expr->expr_array_literal.repeat.value = first;
-    array_literal_expr->expr_array_literal.repeat.count_expr = parse_expression(parser);
+    array_literal_expr->expr_array_literal.repeat.length_expr = parse_expression(parser);
 
     consume(parser, TOKEN_RBRACKET, "Expected ']'");
     return array_literal_expr;

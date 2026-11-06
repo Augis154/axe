@@ -39,7 +39,7 @@ typedef struct {
 
 typedef struct {
   Type *elem_type;
-  size_t count;
+  size_t length;
 } TypeArray;
 
 typedef struct {
@@ -91,7 +91,7 @@ bool type_is_comparable(Type *type);
 bool type_is_orderable(Type *type);
 
 // Relations between types
-// Same type; pointers and arrays are compared by their element types (and count)
+// Same type; pointers and arrays are compared by their element types (and length)
 bool type_equals(Type *a, Type *b);
 // Whether a value of `from` converts implicitly to `to`
 bool type_can_widen_to(Type *from, Type *to);
@@ -101,8 +101,8 @@ Type *type_common(Type *a, Type *b);
 // Building and deriving types
 // Builds the type `*base`
 Type *type_pointer_to(Arena *arena, Type *base);
-// Builds the type `[count]element`
-Type *type_array_of(Arena *arena, Type *element, size_t count);
+// Builds the type `[length]element`
+Type *type_array_of(Arena *arena, Type *element, size_t length);
 // The concrete type an untyped literal takes when nothing else decides it
 Type *type_default(Type *type);
 

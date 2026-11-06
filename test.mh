@@ -10,9 +10,10 @@ fn make_array(): [5]i64 {
 
 fn main(): i64 {
   var xs: [_]i64 = make_array();
+  var ys = [1; 10];
 
-  xs[1] = 9;
+  ys[2] = 9;
 
-  return [0, 2, 4][1];
-  return xs[2];
+  # return [0, 2, 4][1];
+  return ys[[0, 2, 4][1]];
 }
