@@ -103,6 +103,7 @@ typedef struct {
 typedef struct {
   AstExpr *index_expr; // NULL if sequential
   AstExpr *value;
+  uint32_t index; // Filled in by sema
   SourceLoc loc;
 } AstArrayElement;
 

@@ -434,16 +434,33 @@ static void emit_fill(IrGenContext *ctx, IrReg base_reg, IrReg value_reg, Type *
   emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_end);
 }
 
+// The size of the scalar an array is built from; nested arrays are flattened.
+static uint32_t flat_elem_size(Type *array_type) {
+  Type *elem = array_type;
+  while (type_is_array(elem)) {
+    elem = elem->array.elem_type;
+  }
+  return elem->size;
+}
+
+// Zeroes `size` bytes at `base_reg` with stores of at most `unit` bytes; `size` must be a multiple of `unit`.
+static void emit_zero(IrGenContext *ctx, IrReg base_reg, uint32_t size, uint32_t unit) {
+  Type *unit_type = unit >= 8 ? type_i64 : unit == 4 ? type_i32 : type_bool;
+  IrReg zero_reg = emit_int_const(ctx, 0, IR_INT(unit_type->size, false));
+  emit_fill(ctx, base_reg, zero_reg, unit_type, size / unit_type->size);
+}
+
 // Builds `[a, b, ...]` in a new stack slot, storing each element at its offset, and yields the slot's address.
 static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
   Type *arr_type = expr_type(ctx, expr);
+  uint32_t length = arr_type->array.length;
+
   Type *elem_type = arr_type->array.elem_type;
   uint32_t elem_size = elem_type->size;
 
   IrReg arr_ptr = queue_entry_alloc(ctx, arr_type);
 
   if (expr->expr_array_literal.is_repeat) {
-    uint32_t length = arr_type->array.length;
 
     IrReg val_reg = emit_expression(ctx, expr->expr_array_literal.repeat.value);
     emit_fill(ctx, arr_ptr, val_reg, elem_type, length);
@@ -451,10 +468,17 @@ static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
     return arr_ptr;
   }
 
-  for (uint32_t i = 0; i < expr->expr_array_literal.list.element_count; i++) {
-    IrReg val_reg = emit_expression(ctx, expr->expr_array_literal.list.elements[i].value);
+  uint32_t element_count = expr->expr_array_literal.list.element_count;
 
-    size_t offset = (size_t)i * elem_size;
+  if (element_count < arr_type->array.length) {
+    emit_zero(ctx, arr_ptr, arr_type->size, flat_elem_size(arr_type));
+  }
+
+  for (uint32_t i = 0; i < element_count; i++) {
+    AstArrayElement *element = &expr->expr_array_literal.list.elements[i];
+    IrReg val_reg = emit_expression(ctx, element->value);
+
+    size_t offset = (size_t)element->index * elem_size;
     IrReg elem_addr = arr_ptr;
 
     if (offset > 0) {

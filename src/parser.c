@@ -350,12 +350,14 @@ static AstExpr *parse_array_literal(Parser *parser) {
   }
 
   AstExpr *first = parse_expression(parser);
+  if (!first) return NULL;
 
   // 1. Repeat syntax: [val; count]
   if (match(parser, TOKEN_SEMICOLON)) {
     array_literal_expr->expr_array_literal.is_repeat = true;
     array_literal_expr->expr_array_literal.repeat.value = first;
     array_literal_expr->expr_array_literal.repeat.length_expr = parse_expression(parser);
+    if (!array_literal_expr->expr_array_literal.repeat.length_expr) return NULL;
 
     consume(parser, TOKEN_RBRACKET, "Expected ']'");
     return array_literal_expr;
@@ -372,6 +374,7 @@ static AstExpr *parse_array_literal(Parser *parser) {
       array_literal_expr->expr_array_literal.list.is_sparse = true;
       index_expr = first;
       val_expr = parse_expression(parser);
+      if (!val_expr) return NULL;
     } else {
       val_expr = first;
     }
@@ -386,6 +389,7 @@ static AstExpr *parse_array_literal(Parser *parser) {
     if (!match(parser, TOKEN_COMMA) || check(parser, TOKEN_RBRACKET)) break;
 
     first = parse_expression(parser);
+    if (!first) return NULL;
   }
 
   consume(parser, TOKEN_RBRACKET, "Expected ']'");

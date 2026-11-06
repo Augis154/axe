@@ -336,38 +336,89 @@ static bool sema_literal_value_coerce(SemaContext *ctx, AstExpr **slot, Type *ty
   return true;
 }
 
-// Types `[a, b, ...]` and `[value; length]`: values convert to the element type of `hint`, or to their common type.
-static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint) {
-  bool is_repeat = expr->expr_array_literal.is_repeat;
-  int64_t length;
+// Reports a literal error unless `report` is off (used when the length is only probed).
+static void sema_literal_error(SemaContext *ctx, bool report, SourceLoc loc, const char *message) {
+  if (report) sema_error(ctx, loc, "%s", message);
+}
 
-  if (is_repeat) {
+// Length of an array literal (-1 if none). Sets each list element's `index`; element without an index follows last.
+static int64_t array_literal_length(SemaContext *ctx, AstExpr *expr, bool report) {
+  if (expr->expr_array_literal.is_repeat) {
     AstExpr *length_expr = expr->expr_array_literal.repeat.length_expr;
 
     if (length_expr->kind != AST_EXPR_LITERAL || length_expr->expr_literal.kind != AST_LITERAL_INT) {
-      sema_error(ctx, length_expr->loc, "Array repeat length must be an integer literal");
-      return type_error;
+      sema_literal_error(ctx, report, length_expr->loc, "Array repeat length must be an integer literal");
+      return -1;
     }
 
-    length = length_expr->expr_literal.int_value;
-    if (length <= 0) {
-      sema_error(ctx, length_expr->loc, "Array size must be greater than zero");
-      return type_error;
-    }
-  } else {
-    if (expr->expr_array_literal.list.is_sparse) {
-      sema_error(ctx, expr->loc, "Sparse array literals are not yet supported");
-      return type_error;
+    int64_t length = length_expr->expr_literal.int_value;
+    if (length <= 0 || length > UINT32_MAX) {
+      sema_literal_error(ctx, report, length_expr->loc, "Array size must be between 1 and 2^32 - 1");
+      return -1;
     }
 
-    length = expr->expr_array_literal.list.element_count;
-    if (length == 0) {
-      sema_error(ctx, expr->loc, "An array literal needs at least one element");
-      return type_error;
+    return length;
+  }
+
+  AstArrayElement *elements = expr->expr_array_literal.list.elements;
+  uint32_t element_count = expr->expr_array_literal.list.element_count;
+  int64_t next_index = 0;
+  int64_t length = 0;
+
+  for (uint32_t i = 0; i < element_count; i++) {
+    AstExpr *index_expr = elements[i].index_expr;
+
+    if (index_expr) {
+      if (index_expr->kind != AST_EXPR_LITERAL || index_expr->expr_literal.kind != AST_LITERAL_INT) {
+        sema_literal_error(ctx, report, index_expr->loc, "Array index must be an integer literal");
+        return -1;
+      }
+
+      next_index = index_expr->expr_literal.int_value;
+      if (next_index < 0 || next_index >= UINT32_MAX) {
+        sema_literal_error(ctx, report, index_expr->loc, "Array index is out of range");
+        return -1;
+      }
+    }
+
+    if (next_index >= UINT32_MAX) {
+      sema_literal_error(ctx, report, elements[i].loc, "Array index is out of range");
+      return -1;
+    }
+
+    elements[i].index = (uint32_t)next_index++;
+    if (next_index > length) length = next_index;
+  }
+
+  if (expr->expr_array_literal.list.is_sparse) {
+    for (uint32_t i = 0; i < element_count; i++) {
+      for (uint32_t j = 0; j < i; j++) {
+        if (elements[i].index == elements[j].index) {
+          sema_literal_error(ctx, report, elements[i].loc, "Array index is initialized twice");
+          return -1;
+        }
+      }
     }
   }
 
-  uint32_t value_count = is_repeat ? 1 : (uint32_t)length;
+  if (length == 0) {
+    sema_literal_error(ctx, report, expr->loc, "An array literal needs at least one element");
+    return -1;
+  }
+
+  return length;
+}
+
+// Types `[a, b]`, `[i: a]` and `[v; n]`: values convert to the element type of `hint`, or to their common type.
+static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint) {
+  bool is_repeat = expr->expr_array_literal.is_repeat;
+
+  int64_t length = array_literal_length(ctx, expr, true);
+  if (length < 0) {
+    return type_error;
+  }
+
+  uint32_t value_count = is_repeat ? 1 : expr->expr_array_literal.list.element_count;
 
   if (hint == type_error) {
     for (uint32_t i = 0; i < value_count; i++) {
@@ -1011,20 +1062,14 @@ static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *
   Type *elem_type = sema_type(ctx, type->array.elem_type);
   Type *array_type = NULL;
 
-  bool is_plain_list = initializer->kind == AST_EXPR_ARRAY_LITERAL && !initializer->expr_array_literal.is_repeat &&
-                       !initializer->expr_array_literal.list.is_sparse;
-
-  bool is_repeat_literal = initializer->kind == AST_EXPR_ARRAY_LITERAL && initializer->expr_array_literal.is_repeat;
-  AstExpr *repeat_length = is_repeat_literal ? initializer->expr_array_literal.repeat.length_expr : NULL;
+  // A literal knows its length before it is analysed, so it gets the full type as its hint
+  int64_t literal_length =
+    initializer->kind == AST_EXPR_ARRAY_LITERAL ? array_literal_length(ctx, initializer, false) : -1;
 
   if (elem_type == type_error) {
     array_type = type_error;
-  } else if (is_plain_list) {
-    uint32_t length = initializer->expr_array_literal.list.element_count;
-    array_type = length > 0 ? type_array_of(&ctx->comp_unit->arena, elem_type, length) : type_error;
-  } else if (is_repeat_literal && repeat_length->kind == AST_EXPR_LITERAL &&
-             repeat_length->expr_literal.kind == AST_LITERAL_INT && repeat_length->expr_literal.int_value > 0) {
-    array_type = type_array_of(&ctx->comp_unit->arena, elem_type, repeat_length->expr_literal.int_value);
+  } else if (literal_length > 0) {
+    array_type = type_array_of(&ctx->comp_unit->arena, elem_type, literal_length);
   }
 
   Type *init_type = sema_expr_hint(ctx, initializer, array_type);

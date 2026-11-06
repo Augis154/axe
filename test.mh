@@ -12,8 +12,10 @@ fn main(): i64 {
   var xs: [_]i64 = make_array();
   var ys = [1; 10];
 
-  ys[2] = 9;
+  var zs = [
+    2: 4,
+    5: 7
+  ];
 
-  # return [0, 2, 4][1];
-  return ys[[0, 2, 4][1]];
+  return zs[[0, 2, 4][ys[2]]];
 }
