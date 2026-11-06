@@ -34,11 +34,11 @@ typedef enum {
 } TypeKind;
 
 typedef struct {
-  Type *base;
+  Type *base_type;
 } TypePointer;
 
 typedef struct {
-  Type *element;
+  Type *elem_type;
   size_t count;
 } TypeArray;
 

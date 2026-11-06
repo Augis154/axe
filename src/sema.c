@@ -140,8 +140,10 @@ static bool is_lvalue(const AstExpr *expr) {
     return sym->kind == SYMBOL_GLOBAL_VAR || sym->kind == SYMBOL_LOCAL_VAR;
   }
   case AST_EXPR_DEREF:
-  case AST_EXPR_SUBSCRIPT:
     return true;
+
+  case AST_EXPR_SUBSCRIPT:
+    return is_lvalue(expr->expr_subscript.target);
 
   default:
     return false;
@@ -155,6 +157,9 @@ static const char *describe_expr(const AstExpr *expr) {
     return "a literal";
   case AST_EXPR_IDENTIFIER:
     return "a name";
+
+  case AST_EXPR_ARRAY_LITERAL:
+    return "an array literal";
 
   case AST_EXPR_ADDR_OF:
     return "an address-of expression";
@@ -309,6 +314,99 @@ static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   return sym->type;
 }
 
+// Types `[a, b, ...]`: elements convert to the element type of `hint`, or to their common type without one.
+static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint) {
+  if (expr->expr_array_literal.is_repeat) {
+    sema_error(ctx, expr->loc, "Repeat array literals are not yet supported");
+    return type_error;
+  }
+
+  if (expr->expr_array_literal.list.is_sparse) {
+    sema_error(ctx, expr->loc, "Sparse array literals are not yet supported");
+    return type_error;
+  }
+
+  AstArrayElement *elements = expr->expr_array_literal.list.elements;
+  uint32_t count = expr->expr_array_literal.list.element_count;
+  if (count == 0) {
+    sema_error(ctx, expr->loc, "An array literal needs at least one element");
+    return type_error;
+  }
+
+  Type *element_type = NULL;
+
+  if (hint == type_error) {
+    for (uint32_t i = 0; i < count; i++) {
+      sema_expr(ctx, elements[i].value);
+    }
+    return type_error;
+  }
+
+  if (hint) {
+    if (!type_is_array(hint)) {
+      sema_error(ctx, expr->loc, "Cannot convert an array literal to '%s'", hint->name);
+      return type_error;
+    }
+
+    if (count != hint->array.count) {
+      sema_error(
+        ctx, expr->loc, "Array literal has %u elements, but '%s' has %zu", count, hint->name, hint->array.count);
+      return type_error;
+    }
+
+    element_type = hint->array.elem_type;
+  } else {
+    for (uint32_t i = 0; i < count; i++) {
+      Type *type = sema_expr(ctx, elements[i].value);
+      if (type == type_error) {
+        return type_error;
+      }
+
+      Type *common = !element_type || type_equals(element_type, type) ? type : type_common(element_type, type);
+      if (!common) {
+        sema_error(ctx,
+                   elements[i].value->loc,
+                   "Array element %u of type '%s' does not match '%s'",
+                   i,
+                   type->name,
+                   element_type->name);
+        return type_error;
+      }
+
+      element_type = common;
+    }
+
+    element_type = type_default(element_type);
+  }
+
+  bool elements_ok = true;
+
+  for (uint32_t i = 0; i < count; i++) {
+    AstExpr *value = elements[i].value;
+    Type *type = hint ? sema_expr_hint(ctx, value, element_type) : sema_expr_type(ctx, value);
+
+    if (type == type_error) {
+      elements_ok = false;
+      continue;
+    }
+
+    if (!type_can_widen_to(type, element_type)) {
+      sema_error(
+        ctx, value->loc, "Array element %u of type '%s' cannot convert to '%s'", i, type->name, element_type->name);
+      elements_ok = false;
+      continue;
+    }
+
+    sema_coerce(ctx, &elements[i].value, element_type);
+  }
+
+  if (!elements_ok) {
+    return type_error;
+  }
+
+  return hint ? hint : type_array_of(&ctx->comp_unit->arena, element_type, count);
+}
+
 // Types `&x`: an lvalue operand, giving a pointer to it. A variable whose address is taken lives in memory.
 static Type *sema_expr_addr_of(SemaContext *ctx, AstExpr *expr) {
   AstExpr *operand = expr->expr_addr_of.operand;
@@ -346,12 +444,12 @@ static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
     return type_error;
   }
 
-  if (!type_has_storage(operand_type->pointer.base)) {
+  if (!type_has_storage(operand_type->pointer.base_type)) {
     sema_error(ctx, expr->loc, "Cannot dereference '%s'", operand_type->name);
     return type_error;
   }
 
-  return operand_type->pointer.base;
+  return operand_type->pointer.base_type;
 }
 
 // Types `xs[i]`: the target must be an array and the index an integer, which is converted to i64.
@@ -375,7 +473,7 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
 
   sema_coerce(ctx, &expr->expr_subscript.index, type_i64);
 
-  return target_type->array.element;
+  return target_type->array.elem_type;
 }
 
 // Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
@@ -428,14 +526,13 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
 
   for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
     AstExpr *arg_expr = expr->expr_call.arguments[i];
-    Type *arg_type = sema_expr(ctx, arg_expr);
+    Type *expected_type = func_type->param_types[i];
+    Type *arg_type = sema_expr_hint(ctx, arg_expr, expected_type);
 
     if (arg_type == type_error) {
       arguments_ok = false;
       continue;
     }
-
-    Type *expected_type = func_type->param_types[i];
 
     if (!type_can_widen_to(arg_type, expected_type)) {
       sema_error(ctx,
@@ -509,8 +606,8 @@ static Type *sema_pointer_arithmetic(SemaContext *ctx, AstExpr *expr, Type *left
   }
 
   Type *ptr_type = left_is_ptr ? left_type : right_type;
-  if (!type_has_storage(ptr_type->pointer.base)) {
-    sema_error(ctx, expr->loc, "Cannot do arithmetic on a pointer to '%s'", ptr_type->pointer.base->name);
+  if (!type_has_storage(ptr_type->pointer.base_type)) {
+    sema_error(ctx, expr->loc, "Cannot do arithmetic on a pointer to '%s'", ptr_type->pointer.base_type->name);
     return type_error;
   }
 
@@ -753,7 +850,7 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   }
 
   Type *target_type = sema_expr(ctx, target);
-  Type *value_type = sema_expr(ctx, expr->expr_assign.value);
+  Type *value_type = sema_expr_hint(ctx, expr->expr_assign.value, target_type);
 
   if (target_type != type_error && !is_lvalue(target)) {
     sema_error(ctx, expr->loc, "Invalid assignment target: %s cannot be assigned to", describe_expr(target));
@@ -795,6 +892,10 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_IDENTIFIER:
     result_type = sema_expr_identifier(ctx, expr);
+    break;
+
+  case AST_EXPR_ARRAY_LITERAL:
+    result_type = sema_expr_array_literal(ctx, expr, NULL);
     break;
 
   case AST_EXPR_ADDR_OF:
@@ -845,6 +946,20 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
   return result_type;
 }
 
+// Like sema_expr, but `hint` is the type the expression will be converted to.
+Type *sema_expr_hint(SemaContext *ctx, AstExpr *expr, Type *hint) {
+  assert(expr && "sema_expr_hint called without an expression");
+
+  if (expr->kind != AST_EXPR_ARRAY_LITERAL) {
+    return sema_expr(ctx, expr);
+  }
+
+  Type *type = sema_expr_array_literal(ctx, expr, hint);
+  sema_set_expr_type(ctx, expr, type);
+
+  return type;
+}
+
 // Statement semantic analysis functions
 
 static void sema_stmt_block(SemaContext *ctx, AstStmt *stmt) {
@@ -861,19 +976,68 @@ static void sema_stmt_expression(SemaContext *ctx, AstStmt *stmt) {
   sema_expr(ctx, stmt->stmt_expression.expression);
 }
 
+// Resolves `[_]T` and analyses the initializer: a literal against the full type, other values first for their length.
+static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *initializer) {
+  if (!initializer) {
+    sema_error(ctx, type->loc, "Array with inferred length '[_]' must have an initializer");
+    return type_error;
+  }
+
+  Type *elem_type = sema_type(ctx, type->array.elem_type);
+  Type *array_type = NULL;
+
+  bool is_plain_list = initializer->kind == AST_EXPR_ARRAY_LITERAL && !initializer->expr_array_literal.is_repeat &&
+                       !initializer->expr_array_literal.list.is_sparse;
+
+  if (elem_type == type_error) {
+    array_type = type_error;
+  } else if (is_plain_list) {
+    uint32_t elem_count = initializer->expr_array_literal.list.element_count;
+    array_type = elem_count > 0 ? type_array_of(&ctx->comp_unit->arena, elem_type, elem_count) : type_error;
+  }
+
+  Type *init_type = sema_expr_hint(ctx, initializer, array_type);
+
+  if (array_type) {
+    return array_type;
+  }
+
+  if (init_type == type_error) {
+    return type_error;
+  }
+
+  if (!type_is_array(init_type)) {
+    sema_error(ctx, initializer->loc, "Cannot initialize array with non-array type '%s'", init_type->name);
+    return type_error;
+  }
+
+  return type_array_of(&ctx->comp_unit->arena, elem_type, init_type->array.count);
+}
+
+// Resolves a local variable's annotation (NULL if none) and analyses the initializer against it.
+static Type *sema_local_var_type(SemaContext *ctx, AstStmt *stmt) {
+  AstType *declared_type = stmt->stmt_local_var.declared_type;
+  AstExpr *initializer = stmt->stmt_local_var.init;
+
+  if (declared_type && declared_type->kind == AST_TYPE_ARRAY && !declared_type->array.length_expr) {
+    return sema_inferred_array_type(ctx, declared_type, initializer);
+  }
+
+  Type *expected_type = declared_type ? sema_type(ctx, declared_type) : NULL;
+
+  if (initializer) {
+    sema_expr_hint(ctx, initializer, expected_type);
+  }
+
+  return expected_type;
+}
+
 // Declares a variable; the type comes from the annotation or the initializer, which is converted to it.
 static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
   bool reuses_type_name = sema_reject_type_name(ctx, stmt->stmt_local_var.name, stmt->loc);
 
-  Type *expected_type = NULL;
-  if (stmt->stmt_local_var.declared_type) {
-    expected_type = sema_type(ctx, stmt->stmt_local_var.declared_type);
-  }
-
-  Type *init_type = NULL;
-  if (stmt->stmt_local_var.init) {
-    init_type = sema_expr(ctx, stmt->stmt_local_var.init);
-  }
+  Type *expected_type = sema_local_var_type(ctx, stmt);
+  Type *init_type = stmt->stmt_local_var.init ? sema_expr_type(ctx, stmt->stmt_local_var.init) : NULL;
 
   Type *var_type = expected_type ? expected_type : type_default(init_type);
   assert(var_type && "the parser requires a type annotation or an initializer");
@@ -919,7 +1083,7 @@ static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
   Type *actual_type = type_void;
 
   if (stmt->stmt_return.value) {
-    actual_type = sema_expr(ctx, stmt->stmt_return.value);
+    actual_type = sema_expr_hint(ctx, stmt->stmt_return.value, expected_type);
   }
 
   if (!type_can_widen_to(actual_type, expected_type)) {
@@ -1149,7 +1313,7 @@ static Type *sema_type_named(SemaContext *ctx, AstType *type) {
 
 // Resolves `*T`.
 static Type *sema_type_pointer(SemaContext *ctx, AstType *type) {
-  Type *base_type = sema_type(ctx, type->pointer.base);
+  Type *base_type = sema_type(ctx, type->pointer.base_type);
 
   if (base_type == type_error) {
     return type_error;
@@ -1160,27 +1324,32 @@ static Type *sema_type_pointer(SemaContext *ctx, AstType *type) {
 
 // Resolves `[N]T`: the size must be a positive integer literal.
 static Type *sema_type_array(SemaContext *ctx, AstType *type) {
-  Type *element_type = sema_type(ctx, type->array.element);
-  Type *size_type = sema_expr(ctx, type->array.size_expr);
+  if (!type->array.length_expr) {
+    sema_error(ctx, type->loc, "Array with inferred length '[_]' must have an initializer");
+    return type_error;
+  }
+
+  Type *element_type = sema_type(ctx, type->array.elem_type);
+  Type *size_type = sema_expr(ctx, type->array.length_expr);
 
   if (element_type == type_error || size_type == type_error) {
     return type_error;
   }
 
   if (!type_is_integer(size_type)) {
-    sema_error(ctx, type->array.size_expr->loc, "Array size must be an integer, got '%s'", size_type->name);
+    sema_error(ctx, type->array.length_expr->loc, "Array size must be an integer, got '%s'", size_type->name);
     return type_error;
   }
 
-  if (type->array.size_expr->kind != AST_EXPR_LITERAL) {
-    sema_error(ctx, type->array.size_expr->loc, "Array size must be an integer literal");
+  if (type->array.length_expr->kind != AST_EXPR_LITERAL) {
+    sema_error(ctx, type->array.length_expr->loc, "Array size must be an integer literal");
     return type_error;
   }
 
-  size_t size_value = type->array.size_expr->expr_literal.int_value;
+  size_t size_value = type->array.length_expr->expr_literal.int_value;
 
   if (size_value == 0) {
-    sema_error(ctx, type->array.size_expr->loc, "Array size must be greater than zero");
+    sema_error(ctx, type->array.length_expr->loc, "Array size must be greater than zero");
     return type_error;
   }
 

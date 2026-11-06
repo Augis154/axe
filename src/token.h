@@ -75,7 +75,9 @@
   X(TOKEN_AS, "as")             \
   X(TOKEN_NULL, "null")         \
   X(TOKEN_TRUE, "true")         \
-  X(TOKEN_FALSE, "false")
+  X(TOKEN_FALSE, "false")       \
+                                \
+  X(TOKEN_UNDERSCORE, "_")
 
 #define TOKEN_LIST(X) \
   TOKENS_SPECIAL(X)   \

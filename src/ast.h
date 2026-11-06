@@ -54,6 +54,9 @@ typedef enum {
   AST_EXPR_LITERAL,
   AST_EXPR_IDENTIFIER,
 
+  // Composite literals
+  AST_EXPR_ARRAY_LITERAL,
+
   // Access: address-of, dereference, subscript and call
   AST_EXPR_ADDR_OF,
   AST_EXPR_DEREF,
@@ -96,6 +99,31 @@ typedef struct {
   const char *name;
   Symbol *symbol; // Filled in by sema.
 } AstExprIdentifier;
+
+typedef struct {
+  AstExpr *index_expr; // NULL if sequential
+  AstExpr *value;
+  SourceLoc loc;
+} AstArrayElement;
+
+typedef struct {
+  bool is_repeat;
+  union {
+    // Regular list: [1, 2, 3]
+    // Sparse list: [2: 1, 5: 2]
+    struct {
+      AstArrayElement *elements;
+      uint32_t element_count;
+      bool is_sparse;
+    } list;
+
+    // Repeat syntax: [0; 256]
+    struct {
+      AstExpr *value;
+      AstExpr *count_expr;
+    } repeat;
+  };
+} AstExprArrayLiteral;
 
 typedef struct {
   AstExpr *operand;
@@ -152,6 +180,8 @@ struct AstExpr_ {
   union {
     AstExprLiteral expr_literal;
     AstExprIdentifier expr_identifier;
+
+    AstExprArrayLiteral expr_array_literal;
 
     AstExprAddrOf expr_addr_of;
     AstExprDeref expr_deref;
@@ -280,12 +310,12 @@ typedef enum {
 } AstTypeKind;
 
 typedef struct {
-  AstType *base;
+  AstType *base_type;
 } AstTypePointer;
 
 typedef struct {
-  AstType *element;
-  AstExpr *size_expr;
+  AstType *elem_type;
+  AstExpr *length_expr;
 } AstTypeArray;
 
 struct AstType_ {

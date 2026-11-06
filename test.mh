@@ -1,5 +1,5 @@
 fn make_array(): [5]i64 {
-  var xs: [5]i64;
+  var xs: [_]i64 = [1, 2, 3, 4, 5];
 
   xs[0] = 1;
   xs[2] = 5;
@@ -9,9 +9,10 @@ fn make_array(): [5]i64 {
 }
 
 fn main(): i64 {
-  var xs: [5]i64 = make_array();
+  var xs: [_]i64 = make_array();
 
   xs[1] = 9;
 
+  return [0, 2, 4][1];
   return xs[2];
 }

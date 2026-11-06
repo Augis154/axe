@@ -18,6 +18,7 @@ typedef enum {
   IR_OP_LOAD,
   IR_OP_STORE,
   IR_OP_MEMCPY,
+  IR_OP_MEMSET,
 
   // Unary arithmetic and logic
   IR_OP_NEGATE,

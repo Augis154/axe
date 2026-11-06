@@ -73,6 +73,36 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     printf("%s", expr->expr_identifier.name);
     return;
 
+  case AST_EXPR_ARRAY_LITERAL:
+    printf("(array-literal ");
+    if (expr->expr_array_literal.is_repeat) {
+      printf("(repeat ");
+      debug_print_ast_sexpr(arena, expr->expr_array_literal.repeat.value);
+      printf(" ");
+      debug_print_ast_sexpr(arena, expr->expr_array_literal.repeat.count_expr);
+      printf(")");
+    } else {
+      printf("(list ");
+      for (uint32_t i = 0; i < expr->expr_array_literal.list.element_count; i++) {
+        AstArrayElement *elem = &expr->expr_array_literal.list.elements[i];
+        if (elem->index_expr) {
+          printf("(sparse ");
+          debug_print_ast_sexpr(arena, elem->index_expr);
+          printf(" ");
+          debug_print_ast_sexpr(arena, elem->value);
+          printf(")");
+        } else {
+          debug_print_ast_sexpr(arena, elem->value);
+        }
+        if (i < expr->expr_array_literal.list.element_count - 1) {
+          printf(" ");
+        }
+      }
+      printf(")");
+    }
+    printf(")");
+    return;
+
   case AST_EXPR_ADDR_OF:
     printf("(& ");
     debug_print_ast_sexpr(arena, expr->expr_addr_of.operand);
@@ -292,6 +322,9 @@ void debug_print_ir_function(IrFunction *func) {
       continue;
     case IR_OP_MEMCPY:
       printf("%zu: MEMCPY src=[r%u], dst=[r%u], size=%ld\n", i, inst->arg1.id, inst->arg2.id, inst->int_lit);
+      continue;
+    case IR_OP_MEMSET:
+      printf("%zu: MEMSET r%u, dst=[r%u], size=%ld\n", i, inst->arg1.id, inst->arg2.id, inst->int_lit);
       continue;
 
     // Unary arithmetic and logic

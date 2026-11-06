@@ -16,7 +16,7 @@ static Type type_void_ptr_def = {
   .kind = TYPE_KIND_POINTER,
   .size = 8,
   .name = "*void",
-  .pointer = {.base = &type_void_def},
+  .pointer = {.base_type = &type_void_def},
 };
 Type *const type_void_ptr = &type_void_ptr_def;
 
@@ -93,11 +93,11 @@ bool type_equals(Type *a, Type *b) {
   if (a == type_error || b == type_error) return true;
 
   if (type_is_pointer(a) && type_is_pointer(b)) {
-    return type_equals(a->pointer.base, b->pointer.base);
+    return type_equals(a->pointer.base_type, b->pointer.base_type);
   }
 
   if (type_is_array(a) && type_is_array(b)) {
-    return a->array.count == b->array.count && type_equals(a->array.element, b->array.element);
+    return a->array.count == b->array.count && type_equals(a->array.elem_type, b->array.elem_type);
   }
 
   return false;
@@ -131,12 +131,12 @@ bool type_can_widen_to(Type *from, Type *to) {
 
   // Any pointer converts implicitly to `*void`; the way back needs an explicit cast.
   if (type_is_pointer(from) && type_is_pointer(to)) {
-    return type_is_void(to->pointer.base);
+    return type_is_void(to->pointer.base_type);
   }
 
   // An array converts to a pointer to its elements (or to `*void`); it is already represented by its address.
   if (type_is_array(from) && type_is_pointer(to)) {
-    return type_is_void(to->pointer.base) || type_equals(from->array.element, to->pointer.base);
+    return type_is_void(to->pointer.base_type) || type_equals(from->array.elem_type, to->pointer.base_type);
   }
 
   return false;
@@ -162,33 +162,33 @@ Type *type_common(Type *a, Type *b) {
   return NULL;
 }
 
-Type *type_pointer_to(Arena *arena, Type *base) {
-  size_t name_len = strlen(base->name) + 2;
+Type *type_pointer_to(Arena *arena, Type *base_type) {
+  size_t name_len = strlen(base_type->name) + 2;
   char *name = arena_alloc(arena, name_len);
-  snprintf(name, name_len, "*%s", base->name);
+  snprintf(name, name_len, "*%s", base_type->name);
 
   Type *ptr_type = arena_alloc(arena, sizeof(Type));
   *ptr_type = (Type){
     .kind = TYPE_KIND_POINTER,
     .name = name,
     .size = 8,
-    .pointer = {.base = base},
+    .pointer = {.base_type = base_type},
   };
 
   return ptr_type;
 }
 
-Type *type_array_of(Arena *arena, Type *element, size_t count) {
-  size_t name_len = strlen(element->name) + 16;
+Type *type_array_of(Arena *arena, Type *elem_type, size_t count) {
+  size_t name_len = strlen(elem_type->name) + 16;
   char *name = arena_alloc(arena, name_len);
-  snprintf(name, name_len, "[%zu]%s", count, element->name);
+  snprintf(name, name_len, "[%zu]%s", count, elem_type->name);
 
   Type *array_type = arena_alloc(arena, sizeof(Type));
   *array_type = (Type){
     .kind = TYPE_KIND_ARRAY,
     .name = name,
-    .size = element->size * count,
-    .array = {.element = element, .count = count},
+    .size = elem_type->size * count,
+    .array = {.elem_type = elem_type, .count = count},
   };
 
   return array_type;

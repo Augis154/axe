@@ -335,6 +335,71 @@ static AstExpr *parse_identifier(Parser *parser) {
   return expr;
 }
 
+// '[' expression { ',' expression } [ ',' ] ']'
+static AstExpr *parse_array_literal(Parser *parser) {
+  SourceLoc start_loc = parser->previous.loc;
+
+  AstExpr *array_literal_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_ARRAY_LITERAL, start_loc);
+  array_literal_expr->expr_array_literal.is_repeat = false;
+  array_literal_expr->expr_array_literal.list.elements = NULL;
+  array_literal_expr->expr_array_literal.list.element_count = 0;
+  array_literal_expr->expr_array_literal.list.is_sparse = false;
+
+  if (match(parser, TOKEN_RBRACKET)) {
+    return array_literal_expr;
+  }
+
+  AstExpr *first = parse_expression(parser);
+
+  // 1. Repeat syntax: [val; count]
+  if (match(parser, TOKEN_SEMICOLON)) {
+    array_literal_expr->expr_array_literal.is_repeat = true;
+    array_literal_expr->expr_array_literal.repeat.value = first;
+    array_literal_expr->expr_array_literal.repeat.count_expr = parse_expression(parser);
+
+    consume(parser, TOKEN_RBRACKET, "Expected ']'");
+    return array_literal_expr;
+  }
+
+  AstArrayElement *elements = NULL;
+
+  // 2. Parse elements (sequential or sparse):
+  while (true) {
+    AstExpr *index_expr = NULL;
+    AstExpr *val_expr = NULL;
+
+    if (match(parser, TOKEN_COLON)) {
+      array_literal_expr->expr_array_literal.list.is_sparse = true;
+      index_expr = first;
+      val_expr = parse_expression(parser);
+    } else {
+      val_expr = first;
+    }
+
+    AstArrayElement element = {
+      .index_expr = index_expr,
+      .value = val_expr,
+      .loc = val_expr->loc,
+    };
+    da_append(elements, element);
+
+    if (!match(parser, TOKEN_COMMA) || check(parser, TOKEN_RBRACKET)) break;
+
+    first = parse_expression(parser);
+  }
+
+  consume(parser, TOKEN_RBRACKET, "Expected ']'");
+
+  AstArrayElement *element_array =
+    arena_copy_array(&parser->comp_unit->arena, elements, da_len(elements), sizeof(AstArrayElement));
+
+  array_literal_expr->expr_array_literal.list.elements = element_array;
+  array_literal_expr->expr_array_literal.list.element_count = da_len(elements);
+  da_free(elements);
+
+  return array_literal_expr;
+}
+
 // '(' expression ')'  -- the '(' is already consumed.
 static AstExpr *parse_grouping(Parser *parser) {
   AstExpr *expr = parse_expression(parser);
@@ -769,7 +834,7 @@ static AstType *parse_pointer_type(Parser *parser) {
   if (!base_type) return NULL;
 
   AstType *type = ast_type_new(&parser->comp_unit->arena, AST_TYPE_POINTER, start_loc);
-  type->pointer.base = base_type;
+  type->pointer.base_type = base_type;
 
   return type;
 }
@@ -780,8 +845,11 @@ static AstType *parse_array_type(Parser *parser) {
 
   consume(parser, TOKEN_LBRACKET, "Expected '[' for array type.");
 
-  AstExpr *size_expr = parse_expression(parser);
-  if (!size_expr) return NULL;
+  AstExpr *length_expr = NULL;
+  if (!match(parser, TOKEN_UNDERSCORE)) {
+    length_expr = parse_expression(parser);
+    if (!length_expr) return NULL;
+  }
 
   consume(parser, TOKEN_RBRACKET, "Expected ']' after array size.");
 
@@ -789,8 +857,8 @@ static AstType *parse_array_type(Parser *parser) {
   if (!base_type) return NULL;
 
   AstType *type = ast_type_new(&parser->comp_unit->arena, AST_TYPE_ARRAY, start_loc);
-  type->array.element = base_type;
-  type->array.size_expr = size_expr;
+  type->array.elem_type = base_type;
+  type->array.length_expr = length_expr;
 
   return type;
 }
@@ -956,6 +1024,6 @@ static const ParseRule rules[TOKEN_COUNT] = {
 
   // Postfix and grouping; '(' is the call operator and also starts a parenthesised expression
   [TOKEN_LPAREN] = {PREC_POSTFIX, parse_grouping, parse_call},
-  [TOKEN_LBRACKET] = {PREC_POSTFIX, NULL, parse_subscript},
+  [TOKEN_LBRACKET] = {PREC_POSTFIX, parse_array_literal, parse_subscript},
   [TOKEN_DEREF] = {PREC_POSTFIX, NULL, parse_deref},
 };

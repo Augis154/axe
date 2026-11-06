@@ -25,7 +25,7 @@ static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
   Type *element = type;
   while (type_is_array(element)) {
     count *= element->array.count;
-    element = element->array.element;
+    element = element->array.elem_type;
   }
 
   // A bool occupies a single byte in memory, although it is an i32 in a register
@@ -65,7 +65,7 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
     return IR_F64;
 
   case TYPE_KIND_BOOL:
-    return IR_I32;
+    return IR_INT(1, false);
 
   case TYPE_KIND_UNTYPED_INT:
     return IR_I32;
@@ -156,6 +156,14 @@ static IrReg emit_int_const(IrGenContext *ctx, int64_t value, IrType type) {
   return reg;
 }
 
+// Writes `value_reg` of `type` to the address `ptr_reg`: an aggregate is copied, a scalar stored.
+static void emit_store(IrGenContext *ctx, IrReg value_reg, IrReg ptr_reg, Type *value_type) {
+  IrInstr inst = type_is_aggregate(value_type)
+                   ? (IrInstr){.op = IR_OP_MEMCPY, .arg1 = value_reg, .arg2 = ptr_reg, .int_lit = value_type->size}
+                   : (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = ptr_reg};
+  emit_ir_inst(ctx, inst);
+}
+
 // The offset in bytes of `index_reg` elements of `element_size` bytes. The index is an i64.
 static IrReg emit_scaled_offset(IrGenContext *ctx, IrReg index_reg, int64_t element_size) {
   if (element_size == 1) {
@@ -201,6 +209,7 @@ static IrOp conversion_op(IrType from, IrType to) {
   bool to_float = ir_type_is_float(to);
 
   if (!from_float && !to_float) {
+    if (from.size <= 4 && to.size <= 4) return IR_OP_COPY;
     if (from.size >= to.size) return IR_OP_TRUNC;
     return from.is_signed ? IR_OP_SEXT : IR_OP_ZEXT;
   }
@@ -391,12 +400,45 @@ static IrReg emit_identifier(IrGenContext *ctx, AstExpr *expr) {
   return reg;
 }
 
+// Builds `[a, b, ...]` in a new stack slot, storing each element at its offset, and yields the slot's address.
+static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
+  Type *arr_type = expr_type(ctx, expr);
+  Type *elem_type = arr_type->array.elem_type;
+  uint32_t elem_size = elem_type->size;
+
+  IrReg arr_ptr = queue_entry_alloc(ctx, arr_type);
+
+  for (uint32_t i = 0; i < expr->expr_array_literal.list.element_count; i++) {
+    IrReg val = emit_expression(ctx, expr->expr_array_literal.list.elements[i].value);
+
+    size_t offset = (size_t)i * elem_size;
+    IrReg elem_addr = arr_ptr;
+
+    if (offset > 0) {
+      elem_addr = next_ir_reg(ctx, IR_PTR);
+      IrReg off_reg = emit_int_const(ctx, offset, IR_I64);
+
+      IrInstr off_inst = {
+        .op = IR_OP_ADD,
+        .res = elem_addr,
+        .arg1 = arr_ptr,
+        .arg2 = off_reg,
+      };
+      emit_ir_inst(ctx, off_inst);
+    }
+
+    emit_store(ctx, val, elem_addr, elem_type);
+  }
+
+  return arr_ptr;
+}
+
 // The address of `target[index]`, whose register has the type `res_type`: the aggregate's type when the element is one.
 static IrReg emit_array_access(IrGenContext *ctx, AstExpr *target, AstExpr *index, IrType res_type) {
   IrReg target_reg = emit_expression(ctx, target);
   IrReg index_reg = emit_expression(ctx, index);
 
-  int64_t element_size = expr_type(ctx, target)->array.element->size;
+  int64_t element_size = expr_type(ctx, target)->array.elem_type->size;
   IrReg offset_reg = emit_scaled_offset(ctx, index_reg, element_size);
   IrReg res = next_ir_reg(ctx, res_type);
 
@@ -543,7 +585,7 @@ static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *expr) {
 
   bool left_is_ptr = type_is_pointer(left_type);
   Type *ptr_type = left_is_ptr ? left_type : right_type;
-  int64_t element_size = ptr_type->pointer.base->size;
+  int64_t element_size = ptr_type->pointer.base_type->size;
 
   if (type_is_pointer(left_type) && type_is_pointer(right_type)) {
     IrReg bytes_reg = next_ir_reg(ctx, IR_I64);
@@ -690,14 +732,6 @@ static IrReg emit_cast(IrGenContext *ctx, AstExpr *expr) {
   return emit_cast_if_needed(ctx, value_reg, expr_type(ctx, operand), expr_type(ctx, expr));
 }
 
-// Writes `value_reg` of `type` to the address `ptr_reg`: an aggregate is copied, a scalar stored.
-static void emit_store(IrGenContext *ctx, IrReg value_reg, IrReg ptr_reg, Type *value_type) {
-  IrInstr inst = type_is_aggregate(value_type)
-                   ? (IrInstr){.op = IR_OP_MEMCPY, .arg1 = value_reg, .arg2 = ptr_reg, .int_lit = value_type->size}
-                   : (IrInstr){.op = IR_OP_STORE, .arg1 = value_reg, .arg2 = ptr_reg};
-  emit_ir_inst(ctx, inst);
-}
-
 // Stores or copies the value into the target (a register, a slot, a dereference or an element) and yields the value.
 static IrReg emit_assignment(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_assignment: expr is NULL");
@@ -740,6 +774,9 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_IDENTIFIER:
     return emit_identifier(ctx, expr);
+
+  case AST_EXPR_ARRAY_LITERAL:
+    return emit_array_literal(ctx, expr);
 
   case AST_EXPR_ADDR_OF:
     return emit_addr_of(ctx, expr);

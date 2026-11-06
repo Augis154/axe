@@ -37,6 +37,34 @@ static inline char reg_type_char(const IrFunction *func, IrReg reg) {
   return qbe_type_char(func->reg_types[reg.id]);
 }
 
+// The suffix of the QBE load that reads a value of `type` from memory; narrow integers are extended to a word.
+static const char *qbe_load_suffix(IrType type) {
+  switch (type.kind) {
+  case IR_TYPE_INT:
+    if (type.size == 1) return type.is_signed ? "sb" : "ub";
+    if (type.size == 2) return type.is_signed ? "sh" : "uh";
+    return type.size == 4 ? "w" : "l";
+  case IR_TYPE_FLOAT:
+    return type.size == 4 ? "s" : "d";
+  case IR_TYPE_PTR:
+    return "l";
+  case IR_TYPE_NONE:
+  case IR_TYPE_AGG:
+    break;
+  }
+
+  UNREACHABLE("load of a value without a scalar type");
+}
+
+// The suffix of the QBE store that writes a value of `type` to memory; only the low bytes of a narrow integer are
+// written.
+static const char *qbe_store_suffix(IrType type) {
+  if (type.kind == IR_TYPE_INT && type.size == 1) return "b";
+  if (type.kind == IR_TYPE_INT && type.size == 2) return "h";
+
+  return qbe_load_suffix(type);
+}
+
 // The QBE letter of a field of an aggregate; unlike registers, fields keep their exact width.
 static char qbe_field_char(IrType type) {
   switch (type.kind) {
@@ -54,10 +82,12 @@ static char qbe_field_char(IrType type) {
   UNREACHABLE("aggregate field without a scalar type");
 }
 
-// Writes the type of a value crossing a call boundary: `:name` for an aggregate, the type letter otherwise.
+// Writes the type of a value crossing a call boundary: `:name` for an aggregate
 static void qbe_write_abi_type(FILE *file, const IrModule *module, IrType type) {
   if (type.kind == IR_TYPE_AGG) {
     fprintf(file, ":%s", module->aggregates[type.agg_id].name);
+  } else if (type.kind == IR_TYPE_INT && type.size < 4) {
+    fprintf(file, "%s", qbe_load_suffix(type));
   } else {
     fprintf(file, "%c", qbe_type_char(type));
   }
@@ -97,15 +127,17 @@ static void qbe_write_inst(FILE *file, const IrModule *module, const IrFunction 
   }
   case IR_OP_LOAD: {
     char type_char = reg_type_char(func, inst.res);
-    fprintf(file, "  %%r%u =%c load%c %%r%u\n", inst.res.id, type_char, type_char, inst.arg1.id);
+    const char *suffix = qbe_load_suffix(func->reg_types[inst.res.id]);
+    fprintf(file, "  %%r%u =%c load%s %%r%u\n", inst.res.id, type_char, suffix, inst.arg1.id);
     return;
   }
   case IR_OP_STORE: {
-    char type_char = reg_type_char(func, inst.arg1);
-    fprintf(file, "  store%c %%r%u, %%r%u\n", type_char, inst.arg1.id, inst.arg2.id);
+    const char *suffix = qbe_store_suffix(func->reg_types[inst.arg1.id]);
+    fprintf(file, "  store%s %%r%u, %%r%u\n", suffix, inst.arg1.id, inst.arg2.id);
     return;
   }
-  case IR_OP_MEMCPY: {
+  case IR_OP_MEMCPY:
+  case IR_OP_MEMSET: {
     fprintf(file, "  blit %%r%u, %%r%u, %ld\n", inst.arg1.id, inst.arg2.id, inst.int_lit);
     return;
   }
