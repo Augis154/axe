@@ -70,7 +70,7 @@ bool type_is_aggregate(Type *type) {
 // Compiler-internal types
 
 bool type_is_untyped(Type *type) {
-  return type == type_untyped_int || type == type_untyped_float || type == type_untyped_null;
+  return type == type_untyped_int || type == type_untyped_float || type == type_null || type == type_undef;
 }
 
 bool type_is_internal(Type *type) {
@@ -89,7 +89,7 @@ bool type_has_storage(Type *type) {
 bool type_is_comparable(Type *type) {
   if (!type) return false;
   if (type == type_error) return true;
-  return type_is_numeric(type) || type_is_bool(type) || type_is_pointer(type) || type == type_untyped_null;
+  return type_is_numeric(type) || type_is_bool(type) || type_is_pointer(type) || type == type_null;
 }
 
 bool type_is_orderable(Type *type) {
@@ -121,8 +121,8 @@ bool type_can_widen_to(Type *from, Type *to) {
   if (!from || !to) return false;
   if (type_equals(from, to)) return true;
 
-  if (from == type_untyped_null) return type_is_pointer(to);
-  if (to == type_untyped_null) return false;
+  if (from == type_null) return type_is_pointer(to);
+  if (to == type_null) return false;
 
   if (to == type_untyped_int) return false;
   if (to == type_untyped_float) return from == type_untyped_int;
@@ -164,8 +164,8 @@ Type *type_common(Type *a, Type *b) {
     return NULL;
   }
 
-  if (a == type_untyped_null && type_is_pointer(b)) return b;
-  if (b == type_untyped_null && type_is_pointer(a)) return a;
+  if (a == type_null && type_is_pointer(b)) return b;
+  if (b == type_null && type_is_pointer(a)) return a;
 
   if (!type_is_numeric(a) || !type_is_numeric(b)) return NULL;
 
@@ -212,6 +212,6 @@ Type *type_array_of(Arena *arena, Type *elem_type, uint32_t length) {
 Type *type_default(Type *type) {
   if (type == type_untyped_int) return type_i32;
   if (type == type_untyped_float) return type_f64;
-  if (type == type_untyped_null) return type_void_ptr;
+  if (type == type_null) return type_void_ptr;
   return type;
 }

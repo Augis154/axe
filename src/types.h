@@ -10,17 +10,19 @@
 
 #define TYPES_BUILTIN(X)                       \
   X(TYPE_KIND_ERROR, 0, error)                 \
-  X(TYPE_KIND_VOID, 0, void)                   \
-  X(TYPE_KIND_UNTYPED_INT, 8, untyped_int)     \
-  X(TYPE_KIND_UNTYPED_FLOAT, 8, untyped_float) \
-  X(TYPE_KIND_UNTYPED_NULL, 8, untyped_null)   \
                                                \
   X(TYPE_KIND_I32, 4, i32)                     \
   X(TYPE_KIND_I64, 8, i64)                     \
   X(TYPE_KIND_F32, 4, f32)                     \
   X(TYPE_KIND_F64, 8, f64)                     \
+  X(TYPE_KIND_BOOL, 1, bool)                   \
                                                \
-  X(TYPE_KIND_BOOL, 1, bool)
+  X(TYPE_KIND_UNTYPED_INT, 8, untyped_int)     \
+  X(TYPE_KIND_UNTYPED_FLOAT, 8, untyped_float) \
+  X(TYPE_KIND_NULL, 8, null)                   \
+                                               \
+  X(TYPE_KIND_VOID, 0, void)                   \
+  X(TYPE_KIND_UNDEF, 0, undef)
 
 typedef enum {
 #define TYPE_ENUM(kind, size, ident) kind,

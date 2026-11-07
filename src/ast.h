@@ -77,9 +77,11 @@ typedef enum {
   AST_LITERAL_INT,
   AST_LITERAL_FLOAT,
 
-  AST_LITERAL_NULL,
   AST_LITERAL_TRUE,
   AST_LITERAL_FALSE,
+
+  AST_LITERAL_NULL,
+  AST_LITERAL_UNDEF,
 
   AST_LITERAL_CHAR,
   AST_LITERAL_STRING,
@@ -97,7 +99,7 @@ typedef struct {
 
 typedef struct {
   const char *name;
-  Symbol *symbol; // Filled in by sema.
+  Symbol *symbol; // Filled in by sema
 } AstExprIdentifier;
 
 typedef struct {
@@ -229,7 +231,8 @@ typedef struct {
   AstType *declared_type;
   AstExpr *init;
 
-  Symbol *symbol; // Filled in by sema.
+  Symbol *symbol; // Filled in by sema
+  bool is_undef;  // Filled in by sema
 } AstStmtLocalVar;
 
 typedef struct {
@@ -275,7 +278,7 @@ typedef struct {
   SourceLoc loc;
   const char *name;
   AstType *declared_type;
-  Symbol *symbol; // Filled in by sema.
+  Symbol *symbol; // Filled in by sema
 } AstParam;
 
 typedef struct {
@@ -287,7 +290,7 @@ typedef struct {
   AstType *declared_return_type;
   AstStmt *body;
 
-  Symbol *symbol; // Filled in by sema.
+  Symbol *symbol; // Filled in by sema
 } AstDeclFunction;
 
 struct AstDecl_ {

@@ -82,7 +82,7 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
     return IR_I32;
   case TYPE_KIND_UNTYPED_FLOAT:
     return IR_F64;
-  case TYPE_KIND_UNTYPED_NULL:
+  case TYPE_KIND_NULL:
     return IR_PTR;
 
   case TYPE_KIND_POINTER:
@@ -93,6 +93,7 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
 
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
+  case TYPE_KIND_UNDEF:
   case TYPE_KIND_FUNCTION:
     return IR_VOID;
   }
@@ -372,10 +373,12 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
   switch (literal->kind) {
   case AST_LITERAL_INT:
   case AST_LITERAL_FLOAT:
-  case AST_LITERAL_NULL:
   case AST_LITERAL_TRUE:
   case AST_LITERAL_FALSE:
+  case AST_LITERAL_NULL:
     break;
+  case AST_LITERAL_UNDEF:
+    UNREACHABLE("a declaration skips its undef initializer");
   case AST_LITERAL_CHAR:
     UNREACHABLE("sema rejects char literals");
   case AST_LITERAL_STRING:
@@ -392,15 +395,15 @@ static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
     int64_t int_value;
 
     switch (literal->kind) {
+    case AST_LITERAL_INT:
+      int_value = literal->int_value;
+      break;
     case AST_LITERAL_TRUE:
     case AST_LITERAL_FALSE:
       int_value = literal->kind == AST_LITERAL_TRUE ? 1 : 0;
       break;
     case AST_LITERAL_NULL:
       int_value = 0;
-      break;
-    case AST_LITERAL_INT:
-      int_value = literal->int_value;
       break;
     default:
       UNREACHABLE("sema rejects non-numeric literals");
@@ -799,7 +802,7 @@ static void emit_stmt_expression(IrGenContext *ctx, AstStmt *stmt) {
   emit_expression(ctx, stmt->stmt_expression.expression);
 }
 
-// Declares a variable in a register or a memory slot; without an initializer a scalar is zeroed.
+// Declares a variable in a register or a memory slot; it is zeroed unless the initializer is `undef`.
 static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_local_var: stmt is NULL");
 
@@ -808,11 +811,15 @@ static void emit_stmt_local_var(IrGenContext *ctx, AstStmt *stmt) {
 
   bind_symbol_reg(ctx, sym, reg);
 
+  if (stmt->stmt_local_var.is_undef) {
+    return;
+  }
+
   IrReg init_reg = emit_expression(ctx, stmt->stmt_local_var.init);
 
   if (init_reg.id == NULL_REG.id) {
-    // An aggregate without an initializer is left uninitialized; only its slot is reserved
     if (type_is_aggregate(sym->type)) {
+      emit_zero(ctx, reg, sym->type->size, flat_elem_size(sym->type));
       return;
     }
 

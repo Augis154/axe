@@ -286,12 +286,15 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
     return type_untyped_int;
   case AST_LITERAL_FLOAT:
     return type_untyped_float;
-  case AST_LITERAL_NULL:
-    return type_untyped_null;
 
   case AST_LITERAL_TRUE:
   case AST_LITERAL_FALSE:
     return type_bool;
+
+  case AST_LITERAL_NULL:
+    return type_null;
+  case AST_LITERAL_UNDEF:
+    return type_undef;
 
   case AST_LITERAL_CHAR:
   case AST_LITERAL_STRING:
@@ -926,7 +929,7 @@ static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
     return to;
   }
 
-  if (from == type_untyped_null && type_is_pointer(to)) {
+  if (from == type_null && type_is_pointer(to)) {
     sema_concretize(ctx, operand, to);
     return to;
   }
@@ -1094,7 +1097,11 @@ static void sema_stmt_block(SemaContext *ctx, AstStmt *stmt) {
 }
 
 static void sema_stmt_expression(SemaContext *ctx, AstStmt *stmt) {
-  sema_expr(ctx, stmt->stmt_expression.expression);
+  Type *type = sema_expr(ctx, stmt->stmt_expression.expression);
+
+  if (type == type_undef) {
+    sema_error(ctx, stmt->loc, "'undef' can only initialize a variable");
+  }
 }
 
 // Resolves `[_]T` and analyses the initializer: a literal against the full type, other values first for their length.
@@ -1153,7 +1160,8 @@ static Type *sema_local_var_type(SemaContext *ctx, AstStmt *stmt) {
   return expected_type;
 }
 
-// Declares a variable; the type comes from the annotation or the initializer, which is converted to it.
+// Declares a variable; the type comes from the annotation or the initializer, which is converted to it. `undef` needs
+// an annotation and is not converted.
 static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
   bool reuses_type_name = sema_reject_type_name(ctx, stmt->stmt_local_var.name, stmt->loc);
 
@@ -1163,19 +1171,28 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
   Type *var_type = expected_type ? expected_type : type_default(init_type);
   assert(var_type && "the parser requires a type annotation or an initializer");
 
+  bool is_undef = init_type == type_undef;
+  stmt->stmt_local_var.is_undef = is_undef;
+
+  if (is_undef && !expected_type) {
+    sema_error(
+      ctx, stmt->loc, "Cannot infer type of variable '%s' from an undefined initializer", stmt->stmt_local_var.name);
+    var_type = type_error;
+  }
+
   if (!type_has_storage(var_type)) {
     sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type '%s'", stmt->stmt_local_var.name, var_type->name);
     var_type = type_error;
   }
 
-  if (expected_type && init_type && !type_can_widen_to(init_type, var_type)) {
+  if (expected_type && init_type && !is_undef && !type_can_widen_to(init_type, var_type)) {
     sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, var_type->name);
 
     scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, type_error, stmt->loc);
     return;
   }
 
-  if (stmt->stmt_local_var.init) {
+  if (stmt->stmt_local_var.init && !is_undef) {
     sema_coerce(ctx, &stmt->stmt_local_var.init, var_type);
   }
 

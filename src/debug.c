@@ -54,14 +54,17 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     case AST_LITERAL_FLOAT:
       printf("%f", expr->expr_literal.float_value);
       return;
-    case AST_LITERAL_NULL:
-      printf("null");
-      return;
     case AST_LITERAL_TRUE:
       printf("true");
       return;
     case AST_LITERAL_FALSE:
       printf("false");
+      return;
+    case AST_LITERAL_NULL:
+      printf("null");
+      return;
+    case AST_LITERAL_UNDEF:
+      printf("undef");
       return;
     case AST_LITERAL_CHAR:
       printf("'%c'", expr->expr_literal.char_value);

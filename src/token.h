@@ -73,9 +73,10 @@
   X(TOKEN_CONTINUE, "continue") \
                                 \
   X(TOKEN_AS, "as")             \
-  X(TOKEN_NULL, "null")         \
   X(TOKEN_TRUE, "true")         \
   X(TOKEN_FALSE, "false")       \
+  X(TOKEN_NULL, "null")         \
+  X(TOKEN_UNDEF, "undef")       \
                                 \
   X(TOKEN_UNDERSCORE, "_")
 

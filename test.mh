@@ -9,6 +9,9 @@ fn make_array(): [5]i64 {
 }
 
 fn main(): i64 {
+  var zero: [5]i64; # Zero initialized
+  var uninit: [5]i64 = undef; # Uninitialized
+
   var xs: [_]i64 = make_array();
   var ys = [1; 10];
 

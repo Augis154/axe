@@ -300,26 +300,26 @@ static AstExpr *parse_float_literal(Parser *parser) {
   return expr;
 }
 
-// 'null'
-static AstExpr *parse_null_literal(Parser *parser) {
+// 'true' | 'false' | 'null' | 'undef'
+static AstExpr *parse_keyword_literal(Parser *parser) {
   AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
-  expr->expr_literal.kind = AST_LITERAL_NULL;
 
-  return expr;
-}
-
-// 'true'
-static AstExpr *parse_true_literal(Parser *parser) {
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
-  expr->expr_literal.kind = AST_LITERAL_TRUE;
-
-  return expr;
-}
-
-// 'false'
-static AstExpr *parse_false_literal(Parser *parser) {
-  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
-  expr->expr_literal.kind = AST_LITERAL_FALSE;
+  switch (parser->previous.kind) {
+  case TOKEN_TRUE:
+    expr->expr_literal.kind = AST_LITERAL_TRUE;
+    break;
+  case TOKEN_FALSE:
+    expr->expr_literal.kind = AST_LITERAL_FALSE;
+    break;
+  case TOKEN_NULL:
+    expr->expr_literal.kind = AST_LITERAL_NULL;
+    break;
+  case TOKEN_UNDEF:
+    expr->expr_literal.kind = AST_LITERAL_UNDEF;
+    break;
+  default:
+    UNREACHABLE("not a keyword literal");
+  }
 
   return expr;
 }
@@ -981,9 +981,10 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_INT] = {PREC_NONE, parse_int_literal, NULL},
   [TOKEN_FLOAT] = {PREC_NONE, parse_float_literal, NULL},
 
-  [TOKEN_NULL] = {PREC_NONE, parse_null_literal, NULL},
-  [TOKEN_TRUE] = {PREC_NONE, parse_true_literal, NULL},
-  [TOKEN_FALSE] = {PREC_NONE, parse_false_literal, NULL},
+  [TOKEN_TRUE] = {PREC_NONE, parse_keyword_literal, NULL},
+  [TOKEN_FALSE] = {PREC_NONE, parse_keyword_literal, NULL},
+  [TOKEN_NULL] = {PREC_NONE, parse_keyword_literal, NULL},
+  [TOKEN_UNDEF] = {PREC_NONE, parse_keyword_literal, NULL},
 
   // Prefix-only operators
   [TOKEN_BANG] = {PREC_NONE, parse_unary, NULL},
