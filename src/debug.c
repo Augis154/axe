@@ -321,176 +321,200 @@ static const char *reg_type_name(const IrFunction *func, IrReg reg) {
 
 void debug_print_ir_function(IrFunction *func) {
   for (size_t i = 0; i < da_len(func->buffer); i++) {
-    IrInstr *inst = &func->buffer[i];
+    IrInstr *instr = &func->buffer[i];
 
-    switch (inst->op) {
+    switch (instr->op) {
     case IR_OP_NONE:
       printf("%zu: <none>\n", i);
       continue;
 
     // Define a register from a constant or another register
     case IR_OP_LOAD_INT:
-      printf("%zu: r%u:%s = %ld\n", i, inst->res.id, reg_type_name(func, inst->res), inst->int_lit);
+      printf("%zu: r%u:%s = %ld\n", i, instr->res.id, reg_type_name(func, instr->res), instr->int_lit);
       continue;
 
     case IR_OP_LOAD_FLOAT:
-      printf("%zu: r%u:%s = %g\n", i, inst->res.id, reg_type_name(func, inst->res), inst->float_lit);
+      printf("%zu: r%u:%s = %g\n", i, instr->res.id, reg_type_name(func, instr->res), instr->float_lit);
       continue;
 
     case IR_OP_COPY:
-      printf("%zu: r%u:%s = r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
 
     // Memory
     case IR_OP_ALLOC:
-      printf("%zu: r%u:%s = ALLOC %ld\n", i, inst->res.id, reg_type_name(func, inst->res), inst->int_lit);
+      printf("%zu: r%u:%s = ALLOC %ld\n", i, instr->res.id, reg_type_name(func, instr->res), instr->int_lit);
       continue;
     case IR_OP_LOAD:
-      printf("%zu: r%u:%s = LOAD [r%u]\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = LOAD [r%u]\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_STORE:
-      printf("%zu: STORE [r%u] = r%u:%s\n", i, inst->arg2.id, inst->arg1.id, reg_type_name(func, inst->arg1));
+      printf("%zu: STORE [r%u] = r%u:%s\n", i, instr->arg2.id, instr->arg1.id, reg_type_name(func, instr->arg1));
       continue;
     case IR_OP_MEMCPY:
-      printf("%zu: MEMCPY src=[r%u], dst=[r%u], size=%ld\n", i, inst->arg1.id, inst->arg2.id, inst->int_lit);
+      printf("%zu: MEMCPY src=[r%u], dst=[r%u], size=%ld\n", i, instr->arg1.id, instr->arg2.id, instr->int_lit);
       continue;
     case IR_OP_MEMSET:
-      printf("%zu: MEMSET r%u, dst=[r%u], size=%ld\n", i, inst->arg1.id, inst->arg2.id, inst->int_lit);
+      printf("%zu: MEMSET r%u, dst=[r%u], size=%ld\n", i, instr->arg1.id, instr->arg2.id, instr->int_lit);
       continue;
 
     // Unary arithmetic and logic
     case IR_OP_NEGATE:
-      printf("%zu: r%u:%s = -r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = -r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_NOT:
-      printf("%zu: r%u:%s = !r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = !r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
 
     // Binary arithmetic
     case IR_OP_ADD:
       printf(
-        "%zu: r%u:%s = r%u + r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u + r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_SUB:
       printf(
-        "%zu: r%u:%s = r%u - r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u - r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_MUL:
       printf(
-        "%zu: r%u:%s = r%u * r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u * r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_DIV:
       printf(
-        "%zu: r%u:%s = r%u / r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u / r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
 
     // Comparisons; the result is a bool
     case IR_OP_CMP_EQ:
-      printf(
-        "%zu: r%u:%s = r%u == r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+      printf("%zu: r%u:%s = r%u == r%u\n",
+             i,
+             instr->res.id,
+             reg_type_name(func, instr->res),
+             instr->arg1.id,
+             instr->arg2.id);
       continue;
     case IR_OP_CMP_NE:
-      printf(
-        "%zu: r%u:%s = r%u != r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+      printf("%zu: r%u:%s = r%u != r%u\n",
+             i,
+             instr->res.id,
+             reg_type_name(func, instr->res),
+             instr->arg1.id,
+             instr->arg2.id);
       continue;
     case IR_OP_CMP_LT:
       printf(
-        "%zu: r%u:%s = r%u < r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u < r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_CMP_GT:
       printf(
-        "%zu: r%u:%s = r%u > r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u > r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_CMP_LE:
-      printf(
-        "%zu: r%u:%s = r%u <= r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+      printf("%zu: r%u:%s = r%u <= r%u\n",
+             i,
+             instr->res.id,
+             reg_type_name(func, instr->res),
+             instr->arg1.id,
+             instr->arg2.id);
       continue;
     case IR_OP_CMP_GE:
-      printf(
-        "%zu: r%u:%s = r%u >= r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+      printf("%zu: r%u:%s = r%u >= r%u\n",
+             i,
+             instr->res.id,
+             reg_type_name(func, instr->res),
+             instr->arg1.id,
+             instr->arg2.id);
       continue;
 
     // Bitwise operations
     case IR_OP_BIT_NOT:
-      printf("%zu: r%u:%s = ~r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = ~r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_BIT_OR:
       printf(
-        "%zu: r%u:%s = r%u | r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u | r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_BIT_XOR:
       printf(
-        "%zu: r%u:%s = r%u ^ r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u ^ r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_BIT_AND:
       printf(
-        "%zu: r%u:%s = r%u & r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+        "%zu: r%u:%s = r%u & r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id, instr->arg2.id);
       continue;
     case IR_OP_SHL:
-      printf(
-        "%zu: r%u:%s = r%u << r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+      printf("%zu: r%u:%s = r%u << r%u\n",
+             i,
+             instr->res.id,
+             reg_type_name(func, instr->res),
+             instr->arg1.id,
+             instr->arg2.id);
       continue;
     case IR_OP_SHR:
-      printf(
-        "%zu: r%u:%s = r%u >> r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
+      printf("%zu: r%u:%s = r%u >> r%u\n",
+             i,
+             instr->res.id,
+             reg_type_name(func, instr->res),
+             instr->arg1.id,
+             instr->arg2.id);
       continue;
 
     // Conversions between integer and float
     case IR_OP_ITOF:
-      printf("%zu: r%u:%s = ITOF r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = ITOF r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_FTOI:
-      printf("%zu: r%u:%s = FTOI r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = FTOI r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
 
     // Conversions that change the width of an integer
     case IR_OP_SEXT:
-      printf("%zu: r%u:%s = SEXT r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = SEXT r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_ZEXT:
-      printf("%zu: r%u:%s = ZEXT r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = ZEXT r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_TRUNC:
-      printf("%zu: r%u:%s = TRUNC r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = TRUNC r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     // Conversions that change the width of a float
     case IR_OP_FEXT:
-      printf("%zu: r%u:%s = FEXT r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = FEXT r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
     case IR_OP_FTRUNC:
-      printf("%zu: r%u:%s = FTRUNC r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
+      printf("%zu: r%u:%s = FTRUNC r%u\n", i, instr->res.id, reg_type_name(func, instr->res), instr->arg1.id);
       continue;
 
     // Control flow within a function
     case IR_OP_LABEL:
-      printf("%zu: @l%u:\n", i, inst->target.id);
+      printf("%zu: @l%u:\n", i, instr->target.id);
       continue;
     case IR_OP_JUMP:
-      printf("%zu: JUMP @l%u\n", i, inst->target.id);
+      printf("%zu: JUMP @l%u\n", i, instr->target.id);
       continue;
     case IR_OP_JZ:
-      printf("%zu: JZ r%u, @l%u, @l%u\n", i, inst->arg1.id, inst->target_true.id, inst->target_false.id);
+      printf("%zu: JZ r%u, @l%u, @l%u\n", i, instr->arg1.id, instr->target_true.id, instr->target_false.id);
       continue;
     case IR_OP_JNZ:
-      printf("%zu: JNZ r%u, @l%u, @l%u\n", i, inst->arg1.id, inst->target_true.id, inst->target_false.id);
+      printf("%zu: JNZ r%u, @l%u, @l%u\n", i, instr->arg1.id, instr->target_true.id, instr->target_false.id);
       continue;
 
     // Calls and returns
     case IR_OP_CALL:
-      printf("%zu: CALL r%u:%s, %s(", i, inst->res.id, reg_type_name(func, inst->res), inst->call.callee);
-      for (uint32_t j = 0; j < inst->call.arg_count; j++) {
-        printf("r%u:%s", inst->call.args[j].id, reg_type_name(func, inst->call.args[j]));
-        if (j < inst->call.arg_count - 1) {
+      printf("%zu: CALL r%u:%s, %s(", i, instr->res.id, reg_type_name(func, instr->res), instr->call.callee);
+      for (uint32_t j = 0; j < instr->call.arg_count; j++) {
+        printf("r%u:%s", instr->call.args[j].id, reg_type_name(func, instr->call.args[j]));
+        if (j < instr->call.arg_count - 1) {
           printf(", ");
         }
       }
       printf(")\n");
       continue;
     case IR_OP_RETURN:
-      if (inst->arg1.id == NULL_REG.id) {
+      if (instr->arg1.id == NULL_REG.id) {
         printf("%zu: RETURN\n", i);
       } else {
-        printf("%zu: RETURN r%u\n", i, inst->arg1.id);
+        printf("%zu: RETURN r%u\n", i, instr->arg1.id);
       }
       continue;
     }
