@@ -15,7 +15,7 @@ typedef struct {
   const char *token_start;
   const char *current;
 
-  size_t line;
+  uint32_t line;
 } Lexer;
 
 void lexer_init(Lexer *lex, CompilationUnit *comp_unit);

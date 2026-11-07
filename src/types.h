@@ -39,14 +39,14 @@ typedef struct {
 
 typedef struct {
   Type *elem_type;
-  size_t length;
+  uint32_t length;
 } TypeArray;
 
 typedef struct {
   Type *return_type;
   Type **param_types;
 
-  size_t param_count;
+  uint32_t param_count;
   bool is_variadic;
 } TypeFunction;
 
@@ -102,7 +102,7 @@ Type *type_common(Type *a, Type *b);
 // Builds the type `*base`
 Type *type_pointer_to(Arena *arena, Type *base);
 // Builds the type `[length]element`
-Type *type_array_of(Arena *arena, Type *element, size_t length);
+Type *type_array_of(Arena *arena, Type *element, uint32_t length);
 // The concrete type an untyped literal takes when nothing else decides it
 Type *type_default(Type *type);
 

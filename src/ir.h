@@ -84,7 +84,7 @@ typedef struct {
 typedef struct {
   const char *callee;
   IrReg *args;
-  size_t arg_count;
+  uint32_t arg_count;
 } IrCall;
 
 typedef struct {

@@ -9,6 +9,8 @@ static const char *unop_strings[UNOP_COUNT];
 static const char *binop_strings[BINOP_COUNT];
 static const char *logicop_strings[LOGIC_COUNT];
 
+// Token printing functions
+
 static void print_indent(int indent) {
   printf("%*s", indent * 2, "");
 }
@@ -34,6 +36,8 @@ void debug_print_token(Token token) {
     printf("Token: %s\n", render_token_kind(token.kind));
   }
 }
+
+// AST printing functions
 
 void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
   if (!expr) {
@@ -126,7 +130,7 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
   case AST_EXPR_CALL:
     printf("(call ");
     debug_print_ast_sexpr(arena, expr->expr_call.callee);
-    for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+    for (uint32_t i = 0; i < expr->expr_call.argument_count; i++) {
       printf(" ");
       debug_print_ast_sexpr(arena, expr->expr_call.arguments[i]);
     }
@@ -186,9 +190,9 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
   switch (stmt->kind) {
   case AST_STMT_BLOCK:
     printf("Block Statement:\n");
-    for (size_t i = 0; i < stmt->stmt_block.statement_count; i++) {
+    for (uint32_t i = 0; i < stmt->stmt_block.statement_count; i++) {
       print_indent(1);
-      printf("Statement %zu:\n", i);
+      printf("Statement %u:\n", i);
       print_indent(2);
       debug_print_ast_stmt(arena, stmt->stmt_block.statements[i]);
     }
@@ -203,10 +207,6 @@ void debug_print_ast_stmt(Arena *arena, AstStmt *stmt) {
 
   case AST_STMT_LOCAL_VAR:
     printf("Variable Declaration: %s\n", stmt->stmt_local_var.name);
-    // if (stmt->stmt_local_var.declared_type) {
-    //   print_indent(1);
-    //   printf("Type: %s\n", stmt->stmt_local_var.declared_type);
-    // }
     if (stmt->stmt_local_var.init) {
       print_indent(1);
       printf("Init: ");
@@ -288,6 +288,37 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
   printf("<unknown declaration type>\n");
 }
 
+// IR printing functions
+
+// The name of an IR type such as `i32`, `ptr` or `agg0`; the result is valid until a few more calls are made.
+static const char *ir_type_name(IrType type) {
+  static char buffers[4][16];
+  static unsigned next_buffer;
+  char *buf = buffers[next_buffer++ % 4];
+
+  switch (type.kind) {
+  case IR_TYPE_NONE:
+    return "void";
+  case IR_TYPE_INT:
+    snprintf(buf, 16, "%c%u", type.is_signed ? 'i' : 'u', type.size * 8);
+    break;
+  case IR_TYPE_FLOAT:
+    snprintf(buf, 16, "f%u", type.size * 8);
+    break;
+  case IR_TYPE_PTR:
+    return "ptr";
+  case IR_TYPE_AGG:
+    snprintf(buf, 16, "agg%u", type.agg_id);
+    break;
+  }
+
+  return buf;
+}
+
+static const char *reg_type_name(const IrFunction *func, IrReg reg) {
+  return reg.id < da_len(func->reg_types) ? ir_type_name(func->reg_types[reg.id]) : "?";
+}
+
 void debug_print_ir_function(IrFunction *func) {
   for (size_t i = 0; i < da_len(func->buffer); i++) {
     IrInstr *inst = &func->buffer[i];
@@ -299,26 +330,26 @@ void debug_print_ir_function(IrFunction *func) {
 
     // Define a register from a constant or another register
     case IR_OP_LOAD_INT:
-      printf("%zu: r%u = %ld\n", i, inst->res.id, inst->int_lit);
+      printf("%zu: r%u:%s = %ld\n", i, inst->res.id, reg_type_name(func, inst->res), inst->int_lit);
       continue;
 
     case IR_OP_LOAD_FLOAT:
-      printf("%zu: r%u = %g\n", i, inst->res.id, inst->float_lit);
+      printf("%zu: r%u:%s = %g\n", i, inst->res.id, reg_type_name(func, inst->res), inst->float_lit);
       continue;
 
     case IR_OP_COPY:
-      printf("%zu: r%u = r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
 
     // Memory
     case IR_OP_ALLOC:
-      printf("%zu: r%u = ALLOC %ld\n", i, inst->res.id, inst->int_lit);
+      printf("%zu: r%u:%s = ALLOC %ld\n", i, inst->res.id, reg_type_name(func, inst->res), inst->int_lit);
       continue;
     case IR_OP_LOAD:
-      printf("%zu: r%u = LOAD [r%u]\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = LOAD [r%u]\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_STORE:
-      printf("%zu: STORE [r%u] = r%u\n", i, inst->arg2.id, inst->arg1.id);
+      printf("%zu: STORE [r%u] = r%u:%s\n", i, inst->arg2.id, inst->arg1.id, reg_type_name(func, inst->arg1));
       continue;
     case IR_OP_MEMCPY:
       printf("%zu: MEMCPY src=[r%u], dst=[r%u], size=%ld\n", i, inst->arg1.id, inst->arg2.id, inst->int_lit);
@@ -329,90 +360,105 @@ void debug_print_ir_function(IrFunction *func) {
 
     // Unary arithmetic and logic
     case IR_OP_NEGATE:
-      printf("%zu: r%u = -r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = -r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_NOT:
-      printf("%zu: r%u = !r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = !r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
 
     // Binary arithmetic
     case IR_OP_ADD:
-      printf("%zu: r%u = r%u + r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u + r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_SUB:
-      printf("%zu: r%u = r%u - r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u - r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_MUL:
-      printf("%zu: r%u = r%u * r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u * r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_DIV:
-      printf("%zu: r%u = r%u / r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u / r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
 
     // Comparisons; the result is a bool
     case IR_OP_CMP_EQ:
-      printf("%zu: r%u = r%u == r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u == r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_CMP_NE:
-      printf("%zu: r%u = r%u != r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u != r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_CMP_LT:
-      printf("%zu: r%u = r%u < r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u < r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_CMP_GT:
-      printf("%zu: r%u = r%u > r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u > r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_CMP_LE:
-      printf("%zu: r%u = r%u <= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u <= r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_CMP_GE:
-      printf("%zu: r%u = r%u >= r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u >= r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
 
     // Bitwise operations
     case IR_OP_BIT_NOT:
-      printf("%zu: r%u = ~r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = ~r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_BIT_OR:
-      printf("%zu: r%u = r%u | r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u | r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_BIT_XOR:
-      printf("%zu: r%u = r%u ^ r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u ^ r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_BIT_AND:
-      printf("%zu: r%u = r%u & r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u & r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_SHL:
-      printf("%zu: r%u = r%u << r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u << r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
     case IR_OP_SHR:
-      printf("%zu: r%u = r%u >> r%u\n", i, inst->res.id, inst->arg1.id, inst->arg2.id);
+      printf(
+        "%zu: r%u:%s = r%u >> r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id, inst->arg2.id);
       continue;
 
     // Conversions between integer and float
     case IR_OP_ITOF:
-      printf("%zu: r%u = ITOF r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = ITOF r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_FTOI:
-      printf("%zu: r%u = FTOI r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = FTOI r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
 
     // Conversions that change the width of an integer
     case IR_OP_SEXT:
-      printf("%zu: r%u = SEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = SEXT r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_ZEXT:
-      printf("%zu: r%u = ZEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = ZEXT r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_TRUNC:
-      printf("%zu: r%u = TRUNC r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = TRUNC r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     // Conversions that change the width of a float
     case IR_OP_FEXT:
-      printf("%zu: r%u = FEXT r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = FEXT r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
     case IR_OP_FTRUNC:
-      printf("%zu: r%u = FTRUNC r%u\n", i, inst->res.id, inst->arg1.id);
+      printf("%zu: r%u:%s = FTRUNC r%u\n", i, inst->res.id, reg_type_name(func, inst->res), inst->arg1.id);
       continue;
 
     // Control flow within a function
@@ -431,9 +477,9 @@ void debug_print_ir_function(IrFunction *func) {
 
     // Calls and returns
     case IR_OP_CALL:
-      printf("%zu: CALL r%u, %s(", i, inst->res.id, inst->call.callee);
-      for (size_t j = 0; j < inst->call.arg_count; j++) {
-        printf("r%u", inst->call.args[j].id);
+      printf("%zu: CALL r%u:%s, %s(", i, inst->res.id, reg_type_name(func, inst->res), inst->call.callee);
+      for (uint32_t j = 0; j < inst->call.arg_count; j++) {
+        printf("r%u:%s", inst->call.args[j].id, reg_type_name(func, inst->call.args[j]));
         if (j < inst->call.arg_count - 1) {
           printf(", ");
         }
@@ -441,7 +487,11 @@ void debug_print_ir_function(IrFunction *func) {
       printf(")\n");
       continue;
     case IR_OP_RETURN:
-      printf("%zu: RETURN r%u\n", i, inst->arg1.id);
+      if (inst->arg1.id == NULL_REG.id) {
+        printf("%zu: RETURN\n", i);
+      } else {
+        printf("%zu: RETURN r%u\n", i, inst->arg1.id);
+      }
       continue;
     }
 
@@ -450,12 +500,30 @@ void debug_print_ir_function(IrFunction *func) {
 }
 
 void debug_print_ir_module(IrModule *module) {
+  for (size_t i = 0; i < da_len(module->aggregates); i++) {
+    IrAggregate *agg = &module->aggregates[i];
+
+    printf("Aggregate: %s = align %u {", agg->name, agg->alignment);
+    for (size_t j = 0; j < da_len(agg->fields); j++) {
+      printf("%s %s x%u", j > 0 ? "," : "", ir_type_name(agg->fields[j].type), agg->fields[j].count);
+    }
+    printf(" }\n");
+  }
+
   for (size_t i = 0; i < da_len(module->functions); i++) {
     IrFunction *func = &module->functions[i];
-    printf("Function: %s\n", func->name);
+
+    printf("Function: %s(", func->name);
+    for (uint32_t j = 0; j < func->param_count; j++) {
+      printf("%sr%u:%s", j > 0 ? ", " : "", func->params[j].id, reg_type_name(func, func->params[j]));
+    }
+    printf(") -> %s\n", ir_type_name(func->return_type));
+
     debug_print_ir_function(func);
   }
 }
+
+// String tables
 
 static const char *token_strings[TOKEN_COUNT] = {
 #define TOKEN_NAME(token, name) [token] = name,

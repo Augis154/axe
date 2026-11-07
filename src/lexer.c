@@ -1,4 +1,5 @@
 #include "lexer.h"
+
 #include "token.h"
 
 #include <stddef.h>
@@ -14,6 +15,8 @@ typedef struct {
 
 static const Keyword keywords[];
 static const size_t KEYWORD_COUNT;
+
+// Character helpers
 
 static inline bool reached_end(Lexer *l) {
   return l->current >= l->source_end;
@@ -84,6 +87,8 @@ static void skip_whitespace(Lexer *lex) {
   }
 }
 
+// Token builders
+
 static void begin_token(Lexer *lex) {
   lex->token_start = lex->current;
 }
@@ -120,6 +125,8 @@ static Token match_next(Lexer *lex, char expected, TokenKind if_next, TokenKind 
 
   return new_token(lex, otherwise);
 }
+
+// Number and identifier scanning
 
 static Token number(Lexer *lex) {
   // Hex numbers
@@ -188,6 +195,8 @@ static Token identifier(Lexer *lex) {
 
   return new_token(lex, TOKEN_IDENT);
 }
+
+// Lexer public functions
 
 void lexer_init(Lexer *lex, CompilationUnit *comp_unit) {
   lex->source_start = comp_unit->source;
@@ -286,6 +295,8 @@ Token lexer_get_token(Lexer *lex) {
 
   return error_token(lex, error_msg);
 }
+
+// Keyword table
 
 static const Keyword keywords[] = {
 #define KEYWORD_DEF(token, name) {name, sizeof(name) - 1, token},

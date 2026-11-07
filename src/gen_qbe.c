@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// Type and suffix helpers
+
 // The QBE type letter of an IR type; pointers are 64-bit and an aggregate is its address.
 static char qbe_type_char(IrType type) {
   switch (type.kind) {
@@ -56,8 +58,7 @@ static const char *qbe_load_suffix(IrType type) {
   UNREACHABLE("load of a value without a scalar type");
 }
 
-// The suffix of the QBE store that writes a value of `type` to memory; only the low bytes of a narrow integer are
-// written.
+// The suffix of the QBE store that writes a value of `type`; only the low bytes of a narrow integer are written.
 static const char *qbe_store_suffix(IrType type) {
   if (type.kind == IR_TYPE_INT && type.size == 1) return "b";
   if (type.kind == IR_TYPE_INT && type.size == 2) return "h";
@@ -92,6 +93,8 @@ static void qbe_write_abi_type(FILE *file, const IrModule *module, IrType type) 
     fprintf(file, "%c", qbe_type_char(type));
   }
 }
+
+// Instructions
 
 // Writes one IR instruction as QBE IL.
 static void qbe_write_inst(FILE *file, const IrModule *module, const IrFunction *func, IrInstr inst) {
@@ -326,7 +329,7 @@ static void qbe_write_inst(FILE *file, const IrModule *module, const IrFunction 
       fprintf(file, " call $%s(", inst.call.callee);
     }
 
-    for (size_t i = 0; i < inst.call.arg_count; i++) {
+    for (uint32_t i = 0; i < inst.call.arg_count; i++) {
       if (i > 0) fprintf(file, ", ");
 
       IrReg arg_reg = inst.call.args[i];
@@ -349,6 +352,8 @@ static void qbe_write_inst(FILE *file, const IrModule *module, const IrFunction 
 
   UNREACHABLE("unhandled IR opcode");
 }
+
+// Aggregates and functions
 
 // Writes `type :name = align N { ... }` for every aggregate.
 static void qbe_write_aggregates(FILE *file, const IrModule *module) {
@@ -377,7 +382,7 @@ static void qbe_write_function(FILE *file, const IrModule *module, const IrFunct
 
   fprintf(file, "$%s(", func->name);
 
-  for (size_t i = 0; i < func->param_count; i++) {
+  for (uint32_t i = 0; i < func->param_count; i++) {
     IrReg param_reg = func->params[i];
 
     if (i > 0) fprintf(file, ", ");
@@ -393,6 +398,8 @@ static void qbe_write_function(FILE *file, const IrModule *module, const IrFunct
 
   fprintf(file, "}\n");
 }
+
+// QBE generation public functions
 
 bool generate_qbe(const char *filename, const IrModule *module) {
   FILE *file = fopen(filename, "w");

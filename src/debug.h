@@ -11,7 +11,7 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *root);
 void debug_print_ast_stmt(Arena *arena, AstStmt *stmt);
 void debug_print_ast_decl(Arena *arena, AstDecl *decl);
 
-void debug_print_ir_function(IrFunction *ir_func);
+void debug_print_ir_function(IrFunction *func);
 void debug_print_ir_module(IrModule *module);
 
 #endif // DEBUG_H

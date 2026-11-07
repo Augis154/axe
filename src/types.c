@@ -1,7 +1,10 @@
 #include "types.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Builtin types
 
 #define TYPE_DEFINE(type_kind, type_size, ident)                                           \
   static Type type_##ident##_def = {.kind = type_kind, .size = type_size, .name = #ident};
@@ -19,6 +22,8 @@ static Type type_void_ptr_def = {
   .pointer = {.base_type = &type_void_def},
 };
 Type *const type_void_ptr = &type_void_ptr_def;
+
+// What kind a type is
 
 bool type_is_void(Type *type) {
   return type == type_void;
@@ -62,6 +67,8 @@ bool type_is_aggregate(Type *type) {
   return type_is_array(type);
 }
 
+// Compiler-internal types
+
 bool type_is_untyped(Type *type) {
   return type == type_untyped_int || type == type_untyped_float || type == type_untyped_null;
 }
@@ -70,10 +77,14 @@ bool type_is_internal(Type *type) {
   return type == type_error || type_is_untyped(type);
 }
 
+// Properties
+
 bool type_has_storage(Type *type) {
   if (!type) return false;
   return type == type_error || type->size > 0;
 }
+
+// Which operators a type supports
 
 bool type_is_comparable(Type *type) {
   if (!type) return false;
@@ -86,6 +97,8 @@ bool type_is_orderable(Type *type) {
   if (type == type_error) return true;
   return type_is_numeric(type) || type_is_pointer(type);
 }
+
+// Relations between types
 
 bool type_equals(Type *a, Type *b) {
   if (a == b) return true;
@@ -162,6 +175,8 @@ Type *type_common(Type *a, Type *b) {
   return NULL;
 }
 
+// Building and deriving types
+
 Type *type_pointer_to(Arena *arena, Type *base_type) {
   size_t name_len = strlen(base_type->name) + 2;
   char *name = arena_alloc(arena, name_len);
@@ -178,10 +193,10 @@ Type *type_pointer_to(Arena *arena, Type *base_type) {
   return ptr_type;
 }
 
-Type *type_array_of(Arena *arena, Type *elem_type, size_t length) {
+Type *type_array_of(Arena *arena, Type *elem_type, uint32_t length) {
   size_t name_len = strlen(elem_type->name) + 16;
   char *name = arena_alloc(arena, name_len);
-  snprintf(name, name_len, "[%zu]%s", length, elem_type->name);
+  snprintf(name, name_len, "[%u]%s", length, elem_type->name);
 
   Type *array_type = arena_alloc(arena, sizeof(Type));
   *array_type = (Type){

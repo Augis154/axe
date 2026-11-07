@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #define UNUSED(x) ((void)(x))
@@ -24,7 +25,7 @@ typedef struct Scope_ Scope;
 
 typedef struct {
   const char *filename;
-  size_t line;
+  uint32_t line;
 } SourceLoc;
 
 #endif // COMMON_H

@@ -142,7 +142,7 @@ typedef struct {
 typedef struct {
   AstExpr *callee;
   AstExpr **arguments;
-  size_t argument_count;
+  uint32_t argument_count;
 } AstExprCall;
 
 typedef struct {
@@ -217,7 +217,7 @@ typedef enum {
 
 typedef struct {
   AstStmt **statements;
-  size_t statement_count;
+  uint32_t statement_count;
 } AstStmtBlock;
 
 typedef struct {
@@ -282,7 +282,7 @@ typedef struct {
   const char *name;
 
   AstParam *params;
-  size_t param_count;
+  uint32_t param_count;
 
   AstType *declared_return_type;
   AstStmt *body;
@@ -335,7 +335,7 @@ struct AstType_ {
 
 typedef struct {
   AstDecl **decls;
-  size_t decl_count;
+  uint32_t decl_count;
 } AstProgram;
 
 AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc);
@@ -343,9 +343,9 @@ AstStmt *ast_stmt_new(Arena *arena, AstStmtKind kind, SourceLoc loc);
 AstDecl *ast_decl_new(Arena *arena, AstDeclKind kind, SourceLoc loc);
 AstType *ast_type_new(Arena *arena, AstTypeKind kind, SourceLoc loc);
 
-uint32_t ast_expr_count();
-uint32_t ast_stmt_count();
-uint32_t ast_decl_count();
-uint32_t ast_type_count();
+uint32_t ast_expr_count(void);
+uint32_t ast_stmt_count(void);
+uint32_t ast_decl_count(void);
+uint32_t ast_type_count(void);
 
 #endif // AST_H

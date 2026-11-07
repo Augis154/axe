@@ -7,9 +7,7 @@ static uint32_t stmt_id = 1;
 static uint32_t decl_id = 1;
 static uint32_t type_id = 1;
 
-void ast_arena_free(Arena *arena) {
-  arena_free(arena);
-}
+// Node constructors
 
 AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc) {
   AstExpr *expr = arena_alloc(arena, sizeof(AstExpr));
@@ -55,15 +53,17 @@ AstType *ast_type_new(Arena *arena, AstTypeKind kind, SourceLoc loc) {
   return type;
 }
 
-uint32_t ast_expr_count() {
+// Node counts
+
+uint32_t ast_expr_count(void) {
   return expr_id - 1;
 }
-uint32_t ast_stmt_count() {
+uint32_t ast_stmt_count(void) {
   return stmt_id - 1;
 }
-uint32_t ast_decl_count() {
+uint32_t ast_decl_count(void) {
   return decl_id - 1;
 }
-uint32_t ast_type_count() {
+uint32_t ast_type_count(void) {
   return type_id - 1;
 }

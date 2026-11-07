@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Compilation unit functions
+
 void cu_init(CompilationUnit *comp_unit) {
   comp_unit->filename = NULL;
   comp_unit->source = NULL;
@@ -77,6 +79,8 @@ void cu_read_source_file(CompilationUnit *comp_unit, const char *filename) {
   comp_unit->source = buffer;
   comp_unit->source_len = file_size;
 }
+
+// Compilation pipeline
 
 bool compile_file(const char *input_path, const char *output_path) {
   CompilationUnit comp_unit;

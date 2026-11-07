@@ -13,6 +13,8 @@
 
 static IrType get_ir_type(IrGenContext *ctx, Type *type);
 
+// Context and type helpers
+
 static inline IrFunction *get_current_func(IrGenContext *ctx) {
   return &ctx->module->functions[ctx->current_func_idx];
 }
@@ -48,6 +50,15 @@ static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
   da_append(module->aggregates, agg);
 
   return da_len(module->aggregates) - 1;
+}
+
+// The size of the scalar an array is built from; nested arrays are flattened.
+static uint32_t flat_elem_size(Type *array_type) {
+  Type *elem_type = array_type;
+  while (type_is_array(elem_type)) {
+    elem_type = elem_type->array.elem_type;
+  }
+  return elem_type->size;
 }
 
 static IrType get_ir_type(IrGenContext *ctx, Type *type) {
@@ -89,6 +100,8 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
   return IR_I32;
 }
 
+// Registers, labels and symbols
+
 static IrReg next_ir_reg(IrGenContext *ctx, IrType type) {
   IrFunction *func = get_current_func(ctx);
   IrReg reg = (IrReg){.id = (ctx)->next_reg++};
@@ -125,6 +138,8 @@ static IrReg get_symbol_reg(IrGenContext *ctx, Symbol *sym) {
   return reg;
 }
 
+// Low-level emitters
+
 // Appends an instruction to the current function; code after a jump or return is dropped until the next label.
 static void emit_ir_inst(IrGenContext *ctx, IrInstr inst) {
   if (inst.op == IR_OP_LABEL) {
@@ -143,7 +158,7 @@ static void emit_ir_inst(IrGenContext *ctx, IrInstr inst) {
   }
 }
 
-#define emit_ir_instr(ctx, instr, ...) emit_ir_inst(ctx, (IrInstr){.op = (instr), __VA_ARGS__})
+#define emit_ir_instr(ctx, ir_op, ...) emit_ir_inst(ctx, (IrInstr){.op = (ir_op), __VA_ARGS__})
 
 static IrReg emit_int_const(IrGenContext *ctx, int64_t value, IrType type) {
   IrReg reg = next_ir_reg(ctx, type);
@@ -186,6 +201,45 @@ static IrReg emit_scaled_offset(IrGenContext *ctx, IrReg index_reg, int64_t elem
   return bytes_reg;
 }
 
+// Stores `value_reg` into `count` consecutive elements at `base_reg`; `count` must be at least 1.
+static void emit_fill(IrGenContext *ctx, IrReg base_reg, IrReg value_reg, Type *elem_type, uint32_t count) {
+  uint32_t elem_size = elem_type->size;
+
+  IrReg size_reg = emit_int_const(ctx, elem_size, IR_I64);
+  IrReg total_reg = emit_int_const(ctx, (int64_t)count * elem_size, IR_I64);
+
+  // The count is at least 1, so the loop is tested at the bottom
+  IrReg end_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_ADD, .res = end_reg, .arg1 = base_reg, .arg2 = total_reg);
+
+  IrReg ptr_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = base_reg);
+
+  IrLabel loop_start = next_label(ctx);
+  IrLabel loop_end = next_label(ctx);
+
+  emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_start);
+  emit_store(ctx, value_reg, ptr_reg, elem_type);
+
+  // ptr += elem_size, repeating while ptr < end
+  IrReg next_ptr_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_ADD, .res = next_ptr_reg, .arg1 = ptr_reg, .arg2 = size_reg);
+  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = next_ptr_reg);
+
+  IrReg cond_reg = next_ir_reg(ctx, IR_I32);
+  emit_ir_instr(ctx, IR_OP_CMP_LT, .res = cond_reg, .arg1 = ptr_reg, .arg2 = end_reg);
+  emit_ir_instr(ctx, IR_OP_JNZ, .arg1 = cond_reg, .target_true = loop_start, .target_false = loop_end);
+
+  emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_end);
+}
+
+// Zeroes `size` bytes at `base_reg` with stores of at most `unit` bytes; `size` must be a multiple of `unit`.
+static void emit_zero(IrGenContext *ctx, IrReg base_reg, uint32_t size, uint32_t unit) {
+  Type *unit_type = unit >= 8 ? type_i64 : unit == 4 ? type_i32 : type_bool;
+  IrReg zero_reg = emit_int_const(ctx, 0, IR_INT(unit_type->size, false));
+  emit_fill(ctx, base_reg, zero_reg, unit_type, size / unit_type->size);
+}
+
 // Reserves an entry-block stack slot for a value of `type`; the address is typed as the aggregate if it is one.
 static IrReg queue_entry_alloc(IrGenContext *ctx, Type *type) {
   IrReg slot_reg = next_ir_reg(ctx, type_is_aggregate(type) ? get_ir_type(ctx, type) : IR_PTR);
@@ -199,6 +253,8 @@ static IrReg queue_entry_alloc(IrGenContext *ctx, Type *type) {
 
   return slot_reg;
 }
+
+// Conversions
 
 // IR op that converts a value of IR type `from` to IR type `to`.
 static IrOp conversion_op(IrType from, IrType to) {
@@ -402,54 +458,6 @@ static IrReg emit_identifier(IrGenContext *ctx, AstExpr *expr) {
   return reg;
 }
 
-// Stores `value_reg` into `count` consecutive elements at `base_reg`; `count` must be at least 1.
-static void emit_fill(IrGenContext *ctx, IrReg base_reg, IrReg value_reg, Type *elem_type, uint32_t count) {
-  uint32_t elem_size = elem_type->size;
-
-  IrReg size_reg = emit_int_const(ctx, elem_size, IR_I64);
-  IrReg total_reg = emit_int_const(ctx, (int64_t)count * elem_size, IR_I64);
-
-  // The count is at least 1, so the loop is tested at the bottom
-  IrReg end_reg = next_ir_reg(ctx, IR_PTR);
-  emit_ir_instr(ctx, IR_OP_ADD, .res = end_reg, .arg1 = base_reg, .arg2 = total_reg);
-
-  IrReg ptr_reg = next_ir_reg(ctx, IR_PTR);
-  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = base_reg);
-
-  IrLabel loop_start = next_label(ctx);
-  IrLabel loop_end = next_label(ctx);
-
-  emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_start);
-  emit_store(ctx, value_reg, ptr_reg, elem_type);
-
-  // ptr += elem_size, repeating while ptr < end
-  IrReg next_ptr = next_ir_reg(ctx, IR_PTR);
-  emit_ir_instr(ctx, IR_OP_ADD, .res = next_ptr, .arg1 = ptr_reg, .arg2 = size_reg);
-  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = next_ptr);
-
-  IrReg cond = next_ir_reg(ctx, IR_I32);
-  emit_ir_instr(ctx, IR_OP_CMP_LT, .res = cond, .arg1 = ptr_reg, .arg2 = end_reg);
-  emit_ir_instr(ctx, IR_OP_JNZ, .arg1 = cond, .target_true = loop_start, .target_false = loop_end);
-
-  emit_ir_instr(ctx, IR_OP_LABEL, .target = loop_end);
-}
-
-// The size of the scalar an array is built from; nested arrays are flattened.
-static uint32_t flat_elem_size(Type *array_type) {
-  Type *elem = array_type;
-  while (type_is_array(elem)) {
-    elem = elem->array.elem_type;
-  }
-  return elem->size;
-}
-
-// Zeroes `size` bytes at `base_reg` with stores of at most `unit` bytes; `size` must be a multiple of `unit`.
-static void emit_zero(IrGenContext *ctx, IrReg base_reg, uint32_t size, uint32_t unit) {
-  Type *unit_type = unit >= 8 ? type_i64 : unit == 4 ? type_i32 : type_bool;
-  IrReg zero_reg = emit_int_const(ctx, 0, IR_INT(unit_type->size, false));
-  emit_fill(ctx, base_reg, zero_reg, unit_type, size / unit_type->size);
-}
-
 // Builds `[a, b, ...]` in a new stack slot, storing each element at its offset, and yields the slot's address.
 static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
   Type *arr_type = expr_type(ctx, expr);
@@ -458,46 +466,46 @@ static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
   Type *elem_type = arr_type->array.elem_type;
   uint32_t elem_size = elem_type->size;
 
-  IrReg arr_ptr = queue_entry_alloc(ctx, arr_type);
+  IrReg arr_ptr_reg = queue_entry_alloc(ctx, arr_type);
 
   if (expr->expr_array_literal.is_repeat) {
 
     IrReg val_reg = emit_expression(ctx, expr->expr_array_literal.repeat.value);
-    emit_fill(ctx, arr_ptr, val_reg, elem_type, length);
+    emit_fill(ctx, arr_ptr_reg, val_reg, elem_type, length);
 
-    return arr_ptr;
+    return arr_ptr_reg;
   }
 
   uint32_t element_count = expr->expr_array_literal.list.element_count;
 
   if (element_count < arr_type->array.length) {
-    emit_zero(ctx, arr_ptr, arr_type->size, flat_elem_size(arr_type));
+    emit_zero(ctx, arr_ptr_reg, arr_type->size, flat_elem_size(arr_type));
   }
 
   for (uint32_t i = 0; i < element_count; i++) {
     AstArrayElement *element = &expr->expr_array_literal.list.elements[i];
     IrReg val_reg = emit_expression(ctx, element->value);
 
-    size_t offset = (size_t)element->index * elem_size;
-    IrReg elem_addr = arr_ptr;
+    int64_t offset = (int64_t)element->index * elem_size;
+    IrReg elem_addr_reg = arr_ptr_reg;
 
     if (offset > 0) {
-      elem_addr = next_ir_reg(ctx, IR_PTR);
+      elem_addr_reg = next_ir_reg(ctx, IR_PTR);
       IrReg off_reg = emit_int_const(ctx, offset, IR_I64);
 
       IrInstr off_inst = {
         .op = IR_OP_ADD,
-        .res = elem_addr,
-        .arg1 = arr_ptr,
+        .res = elem_addr_reg,
+        .arg1 = arr_ptr_reg,
         .arg2 = off_reg,
       };
       emit_ir_inst(ctx, off_inst);
     }
 
-    emit_store(ctx, val_reg, elem_addr, elem_type);
+    emit_store(ctx, val_reg, elem_addr_reg, elem_type);
   }
 
-  return arr_ptr;
+  return arr_ptr_reg;
 }
 
 // The address of `target[index]`, whose register has the type `res_type`: the aggregate's type when the element is one.
@@ -593,12 +601,12 @@ static IrReg emit_call(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_call: expr is NULL");
 
   IrReg *arg_regs = NULL;
-  size_t arg_count = expr->expr_call.argument_count;
+  uint32_t arg_count = expr->expr_call.argument_count;
 
   if (arg_count > 0) {
     arg_regs = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * arg_count);
 
-    for (size_t i = 0; i < arg_count; i++) {
+    for (uint32_t i = 0; i < arg_count; i++) {
       AstExpr *arg_expr = expr->expr_call.arguments[i];
 
       // The ABI type of an argument comes from its register, so an aggregate address has to be typed as the aggregate
@@ -886,7 +894,7 @@ static void emit_statement(IrGenContext *ctx, AstStmt *stmt);
 static void emit_stmt_block(IrGenContext *ctx, AstStmt *stmt) {
   assert(stmt && "emit_stmt_block: stmt is NULL");
 
-  for (size_t i = 0; i < stmt->stmt_block.statement_count; i++) {
+  for (uint32_t i = 0; i < stmt->stmt_block.statement_count; i++) {
     AstStmt *inner_stmt = stmt->stmt_block.statements[i];
     emit_statement(ctx, inner_stmt);
   }
@@ -1155,7 +1163,7 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
     IrFunction *func = get_current_func(ctx);
     func->params = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * param_count);
 
-    for (size_t i = 0; i < param_count; i++) {
+    for (uint32_t i = 0; i < param_count; i++) {
       Symbol *sym = func_decl->params[i].symbol;
       IrReg param_reg = next_reg(ctx, sym->type);
       IrReg slot_reg = param_reg;
@@ -1200,6 +1208,8 @@ static void emit_decl(IrGenContext *ctx, AstDecl *decl) {
 
   UNREACHABLE("unhandled declaration kind");
 }
+
+// IR generation public functions
 
 void gen_ir_init(IrGenContext *ctx, CompilationUnit *comp_unit, SemaContext *sema_ctx) {
   ctx->comp_unit = comp_unit;
@@ -1249,7 +1259,7 @@ void gen_ir(IrGenContext *ctx, AstProgram *program) {
   module->aggregates = NULL;
   ctx->module = module;
 
-  for (size_t i = 0; i < program->decl_count; i++) {
+  for (uint32_t i = 0; i < program->decl_count; i++) {
     emit_decl(ctx, program->decls[i]);
   }
 }

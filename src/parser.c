@@ -50,7 +50,7 @@ static void error_at(Parser *parser, Token token, const char *message) {
   parser->panic_mode = true;
   parser->comp_unit->had_error = true;
 
-  fprintf(stderr, "[line %zu] Error", token.loc.line);
+  fprintf(stderr, "[line %u] Error", token.loc.line);
 
   if (token.kind == TOKEN_EOF) {
     fprintf(stderr, " at end");
@@ -335,7 +335,7 @@ static AstExpr *parse_identifier(Parser *parser) {
   return expr;
 }
 
-// '[' expression { ',' expression } [ ',' ] ']'
+// '[' elements ']' | '[' expression ';' expression ']', where an element is [ expression ':' ] expression
 static AstExpr *parse_array_literal(Parser *parser) {
   SourceLoc start_loc = parser->previous.loc;
 
@@ -498,8 +498,7 @@ static AstExpr *parse_unary(Parser *parser) {
   return unary_expr;
 }
 
-// left ( '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '>' | '<=' | '>=' | '|' | '^' | '&' | '<<' | '>>' ) right
-//   -- left-associative.
+// left OP right, where OP is an arithmetic, comparison, bitwise or shift operator; left-associative.
 static AstExpr *parse_binary(Parser *parser, AstExpr *left) {
   SourceLoc start_loc = parser->previous.loc;
   TokenKind operator = parser->previous.kind;
@@ -843,7 +842,7 @@ static AstType *parse_pointer_type(Parser *parser) {
   return type;
 }
 
-// '[N]T' type
+// '[' ( expression | '_' ) ']' type
 static AstType *parse_array_type(Parser *parser) {
   SourceLoc start_loc = parser->current.loc;
 
@@ -975,8 +974,7 @@ AstProgram *parse_program(Parser *parser) {
 
 // Parse rules and operator mappings
 
-// Entries run from the loosest infix operator to the tightest, mirroring Precedence.
-// Prefix-only tokens have no infix function, so their precedence stays PREC_NONE.
+// Entries run from the loosest infix operator to the tightest, mirroring Precedence; prefix-only tokens stay PREC_NONE.
 static const ParseRule rules[TOKEN_COUNT] = {
   // Operands
   [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},

@@ -19,7 +19,7 @@ static void sema_error(SemaContext *ctx, SourceLoc loc, const char *message, ...
   va_list args;
   va_start(args, message);
 
-  fprintf(stderr, "[line %zu] Error: ", loc.line);
+  fprintf(stderr, "[line %u] Error: ", loc.line);
   vfprintf(stderr, message, args);
   fprintf(stderr, "\n");
 
@@ -113,13 +113,24 @@ static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type,
   if (existing) {
     sema_error(ctx,
                loc,
-               "Redeclaration of type '%s' in current scope. Previous declaration at line %zu",
+               "Redeclaration of type '%s' in current scope. Previous declaration at line %u",
                name,
                existing->loc.line);
     return NULL;
   }
 
   return scope_insert(ctx, name, SYMBOL_TYPE, type, loc);
+}
+
+// Reports an error if `name` is a type name.
+static bool sema_reject_type_name(SemaContext *ctx, const char *name, SourceLoc loc) {
+  Symbol *existing = scope_lookup(ctx, name);
+  if (!existing || existing->kind != SYMBOL_TYPE) {
+    return false;
+  }
+
+  sema_error(ctx, loc, "'%s' is a type name and cannot be used as a variable name", name);
+  return true;
 }
 
 // Expression types
@@ -251,18 +262,22 @@ static void sema_coerce(SemaContext *ctx, AstExpr **slot, Type *to) {
   }
 }
 
-// Expression semantic analysis functions
+// Array types
 
-// Reports an error if `name` is a type name.
-static bool sema_reject_type_name(SemaContext *ctx, const char *name, SourceLoc loc) {
-  Symbol *existing = scope_lookup(ctx, name);
-  if (!existing || existing->kind != SYMBOL_TYPE) {
-    return false;
+// The largest size of an array in bytes, so that every element offset fits a signed 32-bit displacement.
+#define ARRAY_MAX_SIZE INT32_MAX
+
+// Builds `[length]elem_type`, or reports an error and gives type_error if its size is too large.
+static Type *sema_array_of(SemaContext *ctx, SourceLoc loc, Type *elem_type, uint64_t length) {
+  if (elem_type->size > 0 && length > ARRAY_MAX_SIZE / elem_type->size) {
+    sema_error(ctx, loc, "Array of %llu '%s' is too large", (unsigned long long)length, elem_type->name);
+    return type_error;
   }
 
-  sema_error(ctx, loc, "'%s' is a type name and cannot be used as a variable name", name);
-  return true;
+  return type_array_of(&ctx->comp_unit->arena, elem_type, length);
 }
+
+// Expression semantic analysis functions
 
 // Types a literal
 static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
@@ -314,35 +329,13 @@ static Type *sema_expr_identifier(SemaContext *ctx, AstExpr *expr) {
   return sym->type;
 }
 
-// The slot of the value for element `i`; a repeat literal has a single value shared by every element.
-static AstExpr **array_literal_value_slot(AstExpr *expr, uint32_t i) {
-  return expr->expr_array_literal.is_repeat ? &expr->expr_array_literal.repeat.value
-                                            : &expr->expr_array_literal.list.elements[i].value;
-}
-
-// Converts a literal value of `type` to `elem_type`
-static bool sema_literal_value_coerce(SemaContext *ctx, AstExpr **slot, Type *type, Type *elem_type, uint32_t i) {
-  if (type == type_error) {
-    return false;
-  }
-
-  if (!type_can_widen_to(type, elem_type)) {
-    sema_error(
-      ctx, (*slot)->loc, "Array element %u of type '%s' cannot convert to '%s'", i, type->name, elem_type->name);
-    return false;
-  }
-
-  sema_coerce(ctx, slot, elem_type);
-  return true;
-}
-
 // Reports a literal error unless `report` is off (used when the length is only probed).
 static void sema_literal_error(SemaContext *ctx, bool report, SourceLoc loc, const char *message) {
   if (report) sema_error(ctx, loc, "%s", message);
 }
 
 // Length of an array literal (-1 if none). Sets each list element's `index`; element without an index follows last.
-static int64_t array_literal_length(SemaContext *ctx, AstExpr *expr, bool report) {
+static int64_t sema_array_literal_length(SemaContext *ctx, AstExpr *expr, bool report) {
   if (expr->expr_array_literal.is_repeat) {
     AstExpr *length_expr = expr->expr_array_literal.repeat.length_expr;
 
@@ -409,11 +402,33 @@ static int64_t array_literal_length(SemaContext *ctx, AstExpr *expr, bool report
   return length;
 }
 
+// The slot of the value for element `i`; a repeat literal has a single value shared by every element.
+static AstExpr **array_literal_value_slot(AstExpr *expr, uint32_t i) {
+  return expr->expr_array_literal.is_repeat ? &expr->expr_array_literal.repeat.value
+                                            : &expr->expr_array_literal.list.elements[i].value;
+}
+
+// Converts a literal value of `type` to `elem_type`
+static bool sema_literal_value_coerce(SemaContext *ctx, AstExpr **slot, Type *type, Type *elem_type, uint32_t i) {
+  if (type == type_error) {
+    return false;
+  }
+
+  if (!type_can_widen_to(type, elem_type)) {
+    sema_error(
+      ctx, (*slot)->loc, "Array element %u of type '%s' cannot convert to '%s'", i, type->name, elem_type->name);
+    return false;
+  }
+
+  sema_coerce(ctx, slot, elem_type);
+  return true;
+}
+
 // Types `[a, b]`, `[i: a]` and `[v; n]`: values convert to the element type of `hint`, or to their common type.
 static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint) {
   bool is_repeat = expr->expr_array_literal.is_repeat;
 
-  int64_t length = array_literal_length(ctx, expr, true);
+  int64_t length = sema_array_literal_length(ctx, expr, true);
   if (length < 0) {
     return type_error;
   }
@@ -435,10 +450,11 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
       return type_error;
     }
 
-    if ((size_t)length != hint->array.length) {
+    bool is_sparse = !is_repeat && expr->expr_array_literal.list.is_sparse;
+    if (is_sparse ? length > hint->array.length : length != hint->array.length) {
       sema_error(ctx,
                  expr->loc,
-                 "Array literal has %lld elements, but '%s' has %zu",
+                 "Array literal has %lld elements, but '%s' has %u",
                  (long long)length,
                  hint->name,
                  hint->array.length);
@@ -455,14 +471,14 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
         return type_error;
       }
 
-      Type *common = !elem_type || type_equals(elem_type, type) ? type : type_common(elem_type, type);
-      if (!common) {
+      Type *common_type = !elem_type || type_equals(elem_type, type) ? type : type_common(elem_type, type);
+      if (!common_type) {
         sema_error(
           ctx, value->loc, "Array element %u of type '%s' does not match '%s'", i, type->name, elem_type->name);
         return type_error;
       }
 
-      elem_type = common;
+      elem_type = common_type;
     }
 
     elem_type = type_default(elem_type);
@@ -480,7 +496,7 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
     return type_error;
   }
 
-  return hint ? hint : type_array_of(&ctx->comp_unit->arena, elem_type, length);
+  return hint ? hint : sema_array_of(ctx, expr->loc, elem_type, length);
 }
 
 // Types `&x`: an lvalue operand, giving a pointer to it. A variable whose address is taken lives in memory.
@@ -528,6 +544,24 @@ static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
   return operand_type->pointer.base_type;
 }
 
+// Whether `expr` is an integer literal, possibly negated; its value is stored in `value`.
+static bool const_int_value(AstExpr *expr, int64_t *value) {
+  if (expr->kind == AST_EXPR_LITERAL && expr->expr_literal.kind == AST_LITERAL_INT) {
+    *value = expr->expr_literal.int_value;
+    return true;
+  }
+
+  if (expr->kind == AST_EXPR_UNARY && expr->expr_unary.op == UNOP_NEGATE) {
+    int64_t operand;
+    if (const_int_value(expr->expr_unary.operand, &operand)) {
+      *value = -operand;
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Types `xs[i]`: the target must be an array and the index an integer, which is converted to i64.
 static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
   Type *target_type = sema_expr(ctx, expr->expr_subscript.target);
@@ -547,6 +581,17 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
     return type_error;
   }
 
+  int64_t index_value;
+  if (const_int_value(expr->expr_subscript.index, &index_value) &&
+      (index_value < 0 || (uint64_t)index_value >= target_type->array.length)) {
+    sema_error(ctx,
+               expr->expr_subscript.index->loc,
+               "Array index %lld is out of bounds for '%s'",
+               (long long)index_value,
+               target_type->name);
+    return type_error;
+  }
+
   sema_coerce(ctx, &expr->expr_subscript.index, type_i64);
 
   return target_type->array.elem_type;
@@ -554,7 +599,7 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
 
 // Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
 static void sema_call_arguments(SemaContext *ctx, AstExpr *expr) {
-  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+  for (uint32_t i = 0; i < expr->expr_call.argument_count; i++) {
     sema_expr(ctx, expr->expr_call.arguments[i]);
   }
 }
@@ -590,7 +635,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   if (expr->expr_call.argument_count != func_type->param_count) {
     sema_error(ctx,
                expr->loc,
-               "Function '%s' expects %zu arguments, but %zu were provided",
+               "Function '%s' expects %u arguments, but %u were provided",
                callee->expr_identifier.name,
                func_type->param_count,
                expr->expr_call.argument_count);
@@ -600,7 +645,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
 
   bool arguments_ok = true;
 
-  for (size_t i = 0; i < expr->expr_call.argument_count; i++) {
+  for (uint32_t i = 0; i < expr->expr_call.argument_count; i++) {
     AstExpr *arg_expr = expr->expr_call.arguments[i];
     Type *expected_type = func_type->param_types[i];
     Type *arg_type = sema_expr_hint(ctx, arg_expr, expected_type);
@@ -613,7 +658,7 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     if (!type_can_widen_to(arg_type, expected_type)) {
       sema_error(ctx,
                  arg_expr->loc,
-                 "Argument %zu of function '%s' expects type '%s', but got '%s'",
+                 "Argument %u of function '%s' expects type '%s', but got '%s'",
                  i + 1,
                  callee->expr_identifier.name,
                  expected_type->name,
@@ -1041,7 +1086,7 @@ Type *sema_expr_hint(SemaContext *ctx, AstExpr *expr, Type *hint) {
 static void sema_stmt_block(SemaContext *ctx, AstStmt *stmt) {
   ctx->current_scope = scope_enter(ctx, ctx->current_scope);
 
-  for (size_t i = 0; i < stmt->stmt_block.statement_count; i++) {
+  for (uint32_t i = 0; i < stmt->stmt_block.statement_count; i++) {
     sema_stmt(ctx, stmt->stmt_block.statements[i]);
   }
 
@@ -1064,12 +1109,12 @@ static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *
 
   // A literal knows its length before it is analysed, so it gets the full type as its hint
   int64_t literal_length =
-    initializer->kind == AST_EXPR_ARRAY_LITERAL ? array_literal_length(ctx, initializer, false) : -1;
+    initializer->kind == AST_EXPR_ARRAY_LITERAL ? sema_array_literal_length(ctx, initializer, false) : -1;
 
   if (elem_type == type_error) {
     array_type = type_error;
   } else if (literal_length > 0) {
-    array_type = type_array_of(&ctx->comp_unit->arena, elem_type, literal_length);
+    array_type = sema_array_of(ctx, initializer->loc, elem_type, literal_length);
   }
 
   Type *init_type = sema_expr_hint(ctx, initializer, array_type);
@@ -1087,7 +1132,7 @@ static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *
     return type_error;
   }
 
-  return type_array_of(&ctx->comp_unit->arena, elem_type, init_type->array.length);
+  return sema_array_of(ctx, initializer->loc, elem_type, init_type->array.length);
 }
 
 // Resolves a local variable's annotation (NULL if none) and analyses the initializer against it.
@@ -1254,7 +1299,7 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
   Type *return_type = sema_type(ctx, func_decl->declared_return_type);
 
   Type **param_types = arena_alloc(&ctx->comp_unit->arena, sizeof(Type *) * func_decl->param_count);
-  for (size_t i = 0; i < func_decl->param_count; i++) {
+  for (uint32_t i = 0; i < func_decl->param_count; i++) {
     param_types[i] = sema_type(ctx, func_decl->params[i].declared_type);
 
     if (!type_has_storage(param_types[i])) {
@@ -1380,7 +1425,7 @@ static Type *sema_type_named(SemaContext *ctx, AstType *type) {
 
   if (sym->kind != SYMBOL_TYPE) {
     const char *what = sym->kind == SYMBOL_FUNCTION ? "a function" : "a variable";
-    sema_error(ctx, type->loc, "'%s' is %s, not a type (declared at line %zu)", type->named, what, sym->loc.line);
+    sema_error(ctx, type->loc, "'%s' is %s, not a type (declared at line %u)", type->named, what, sym->loc.line);
     return type_error;
   }
 
@@ -1422,14 +1467,14 @@ static Type *sema_type_array(SemaContext *ctx, AstType *type) {
     return type_error;
   }
 
-  size_t size_value = type->array.length_expr->expr_literal.int_value;
+  int64_t size_value = type->array.length_expr->expr_literal.int_value;
 
   if (size_value == 0) {
     sema_error(ctx, type->array.length_expr->loc, "Array size must be greater than zero");
     return type_error;
   }
 
-  return type_array_of(&ctx->comp_unit->arena, element_type, size_value);
+  return sema_array_of(ctx, type->array.length_expr->loc, element_type, size_value);
 }
 
 // Resolves a written type to a Type: no type means void.
@@ -1486,11 +1531,11 @@ void sema_free(SemaContext *ctx) {
 
 // Runs pass 1 over all declarations, then pass 2
 void sema_program(SemaContext *ctx, AstProgram *program) {
-  for (size_t i = 0; i < program->decl_count; i++) {
+  for (uint32_t i = 0; i < program->decl_count; i++) {
     sema_pass1_decl(ctx, program->decls[i]);
   }
 
-  for (size_t i = 0; i < program->decl_count; i++) {
+  for (uint32_t i = 0; i < program->decl_count; i++) {
     sema_pass2_decl(ctx, program->decls[i]);
   }
 }
