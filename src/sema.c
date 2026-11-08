@@ -54,19 +54,37 @@ static Symbol *symbol_new(SemaContext *ctx, const char *name, SymbolKind kind, T
   return sym;
 }
 
+// Finds `name` declared directly in `scope`. `name` must be interned. The global scope is large, so it is
+// indexed by the compilation unit's symbol table; nested scopes are small and scanned linearly.
+static Symbol *scope_find(SemaContext *ctx, Scope *scope, const char *name) {
+  if (scope->parent == NULL) {
+    return st_get(&ctx->comp_unit->symbol_table, name);
+  }
+
+  for (Symbol *sym = scope->symbols; sym != NULL; sym = sym->next) {
+    if (sym->name == name) {
+      return sym;
+    }
+  }
+
+  return NULL;
+}
+
 // Declares `name` in the current scope; returns NULL if it is already declared there.
 static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind, Type *type, SourceLoc loc) {
   const char *interned_name = st_intern(&ctx->comp_unit->intern_table, name);
 
-  for (Symbol *sym = ctx->current_scope->symbols; sym != NULL; sym = sym->next) {
-    if (sym->name == interned_name) {
-      return NULL;
-    }
+  if (scope_find(ctx, ctx->current_scope, interned_name)) {
+    return NULL;
   }
 
   Symbol *sym = symbol_new(ctx, interned_name, kind, type, loc);
   sym->next = ctx->current_scope->symbols;
   ctx->current_scope->symbols = sym;
+
+  if (ctx->current_scope->parent == NULL) {
+    st_set(&ctx->comp_unit->symbol_table, interned_name, sym);
+  }
 
   return sym;
 }
@@ -74,10 +92,9 @@ static Symbol *scope_insert(SemaContext *ctx, const char *name, SymbolKind kind,
 // Finds `name` in the current scope or any enclosing one (names are interned, so pointers are compared).
 static Symbol *scope_lookup(SemaContext *ctx, const char *name) {
   for (Scope *sc = ctx->current_scope; sc != NULL; sc = sc->parent) {
-    for (Symbol *sym = sc->symbols; sym != NULL; sym = sym->next) {
-      if (sym->name == name) {
-        return sym;
-      }
+    Symbol *sym = scope_find(ctx, sc, name);
+    if (sym) {
+      return sym;
     }
   }
 
@@ -87,10 +104,9 @@ static Symbol *scope_lookup(SemaContext *ctx, const char *name) {
 // Finds the symbol a type name refers to.
 static Symbol *scope_lookup_type_name(SemaContext *ctx, const char *name) {
   for (Scope *sc = ctx->current_scope; sc != NULL; sc = sc->parent) {
-    for (Symbol *sym = sc->symbols; sym != NULL; sym = sym->next) {
-      if (sym->name == name && (sym->kind == SYMBOL_TYPE || sym->type != type_error)) {
-        return sym;
-      }
+    Symbol *sym = scope_find(ctx, sc, name);
+    if (sym && (sym->kind == SYMBOL_TYPE || sym->type != type_error)) {
+      return sym;
     }
   }
 
@@ -98,12 +114,7 @@ static Symbol *scope_lookup_type_name(SemaContext *ctx, const char *name) {
 }
 
 static Symbol *scope_lookup_current(SemaContext *ctx, const char *name) {
-  for (Symbol *sym = ctx->current_scope->symbols; sym != NULL; sym = sym->next) {
-    if (sym->name == name) {
-      return sym;
-    }
-  }
-  return NULL;
+  return scope_find(ctx, ctx->current_scope, name);
 }
 
 static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type, SourceLoc loc) {
