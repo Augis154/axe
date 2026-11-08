@@ -189,6 +189,10 @@ static const char *describe_expr(const AstExpr *expr) {
     return "a dereference";
   case AST_EXPR_SUBSCRIPT:
     return "a subscript";
+  case AST_EXPR_SLICE:
+    return "a slice";
+  case AST_EXPR_MEMBER:
+    return "a member access";
   case AST_EXPR_CALL:
     return "a function call result";
 
@@ -278,9 +282,18 @@ static void sema_coerce(SemaContext *ctx, AstExpr **slot, Type *to) {
 // The largest size of an array in bytes, so that every element offset fits a signed 32-bit displacement.
 #define ARRAY_MAX_SIZE INT32_MAX
 
-// Builds `[length]elem_type`, or reports an error and gives type_error if its size is too large.
+// Builds `[length]elem_type`, or reports an error and gives type_error if its elements have no size or it is too large.
 static Type *sema_array_of(SemaContext *ctx, SourceLoc loc, Type *elem_type, uint64_t length) {
-  if (elem_type->size > 0 && length > ARRAY_MAX_SIZE / elem_type->size) {
+  if (elem_type == type_error) {
+    return type_error;
+  }
+
+  if (elem_type->size == 0) {
+    sema_error(ctx, loc, "Cannot make an array of '%s'", elem_type->name);
+    return type_error;
+  }
+
+  if (length > ARRAY_MAX_SIZE / elem_type->size) {
     sema_error(ctx, loc, "Array of %llu '%s' is too large", (unsigned long long)length, elem_type->name);
     return type_error;
   }
@@ -576,7 +589,7 @@ static bool const_int_value(AstExpr *expr, int64_t *value) {
   return false;
 }
 
-// Types `xs[i]`: the target must be an array and the index an integer, which is converted to i64.
+// Types `xs[i]`: the target must be an array or a slice and the index an integer, which is converted to i64.
 static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
   Type *target_type = sema_expr(ctx, expr->expr_subscript.target);
   Type *index_type = sema_expr(ctx, expr->expr_subscript.index);
@@ -585,7 +598,7 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
     return type_error;
   }
 
-  if (target_type->kind != TYPE_KIND_ARRAY) {
+  if (!type_is_array_like(target_type)) {
     sema_error(ctx, expr->loc, "Cannot subscript non-array type '%s'", target_type->name);
     return type_error;
   }
@@ -596,7 +609,9 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
   }
 
   int64_t index_value;
-  if (const_int_value(expr->expr_subscript.index, &index_value) &&
+  bool index_is_const = const_int_value(expr->expr_subscript.index, &index_value);
+
+  if (target_type->kind == TYPE_KIND_ARRAY && index_is_const &&
       (index_value < 0 || (uint64_t)index_value >= target_type->array.length)) {
     sema_error(ctx,
                expr->expr_subscript.index->loc,
@@ -608,7 +623,106 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
 
   sema_coerce(ctx, &expr->expr_subscript.index, type_i64);
 
-  return target_type->array.elem_type;
+  return type_elem(target_type);
+}
+
+// Types a slice bound: it must be an integer, which is converted to i64. Returns false after reporting an error.
+static bool sema_slice_bound(SemaContext *ctx, AstExpr **slot, const char *which) {
+  assert(slot && *slot && "sema_slice_bound: bound is missing");
+
+  Type *type = sema_expr(ctx, *slot);
+
+  if (type == type_error) {
+    return false;
+  }
+
+  if (!type_is_integer(type)) {
+    sema_error(ctx, (*slot)->loc, "Slice %s index must be an integer, got '%s'", which, type->name);
+    return false;
+  }
+
+  sema_coerce(ctx, slot, type_i64);
+  return true;
+}
+
+// Reports constant bounds that are negative, past the end of an array, or out of order. Returns false after an error.
+static bool sema_check_slice_bounds(SemaContext *ctx, AstExpr *expr, Type *target_type) {
+  assert(type_is_array_like(target_type) && "sema_check_slice_bounds: target is neither an array nor a slice");
+
+  AstExpr *bounds[] = {expr->expr_slice.start, expr->expr_slice.end};
+  const char *names[] = {"start", "end"};
+  int64_t values[2] = {0, 0};
+  bool is_const[2] = {false, false};
+
+  for (int i = 0; i < 2; i++) {
+    if (!bounds[i] || !const_int_value(bounds[i], &values[i])) {
+      continue;
+    }
+
+    is_const[i] = true;
+
+    bool past_end = type_is_array(target_type) && (uint64_t)values[i] > target_type->array.length;
+    if (values[i] < 0 || past_end) {
+      sema_error(ctx,
+                 bounds[i]->loc,
+                 "Slice %s index %lld is out of bounds for '%s'",
+                 names[i],
+                 (long long)values[i],
+                 target_type->name);
+      return false;
+    }
+  }
+
+  if (is_const[0] && is_const[1] && values[0] > values[1]) {
+    sema_error(ctx,
+               expr->loc,
+               "Slice start index %lld is greater than end index %lld",
+               (long long)values[0],
+               (long long)values[1]);
+    return false;
+  }
+
+  return true;
+}
+
+// Types `xs[start:end]`: the target must be an array or a slice and each bound that is present an integer, which is
+// converted to i64. The result is a slice of the same element type.
+static Type *sema_expr_slice(SemaContext *ctx, AstExpr *expr) {
+  Type *target_type = sema_expr(ctx, expr->expr_slice.target);
+
+  if (target_type == type_error) {
+    return type_error;
+  }
+
+  if (!type_is_array_like(target_type)) {
+    sema_error(ctx, expr->loc, "Cannot slice non-array type '%s'", target_type->name);
+    return type_error;
+  }
+
+  if (expr->expr_slice.start && !sema_slice_bound(ctx, &expr->expr_slice.start, "start")) {
+    return type_error;
+  }
+
+  if (expr->expr_slice.end && !sema_slice_bound(ctx, &expr->expr_slice.end, "end")) {
+    return type_error;
+  }
+
+  if (!sema_check_slice_bounds(ctx, expr, target_type)) {
+    return type_error;
+  }
+
+  return type_slice_of(&ctx->comp_unit->arena, type_elem(target_type));
+}
+
+// Types `object.member`; member access is parsed but not supported yet, so it is always an error.
+static Type *sema_expr_member(SemaContext *ctx, AstExpr *expr) {
+  Type *object_type = sema_expr(ctx, expr->expr_member.object);
+  if (object_type == type_error) {
+    return type_error;
+  }
+
+  sema_error(ctx, expr->loc, "Member access is not yet supported in semantic analysis");
+  return type_error;
 }
 
 // Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
@@ -953,7 +1067,11 @@ static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
     return to;
   }
 
-  if (from == to && from != type_void) {
+  if (type_is_array(from) && type_is_slice(to) && type_can_widen_to(from, to)) {
+    return to;
+  }
+
+  if (type_equals(from, to) && from != type_void) {
     return to;
   }
 
@@ -1043,6 +1161,14 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_SUBSCRIPT:
     result_type = sema_expr_subscript(ctx, expr);
+    break;
+
+  case AST_EXPR_SLICE:
+    result_type = sema_expr_slice(ctx, expr);
+    break;
+
+  case AST_EXPR_MEMBER:
+    result_type = sema_expr_member(ctx, expr);
     break;
 
   case AST_EXPR_CALL:
@@ -1505,6 +1631,22 @@ static Type *sema_type_array(SemaContext *ctx, AstType *type) {
   return sema_array_of(ctx, type->array.length_expr->loc, element_type, size_value);
 }
 
+// Resolves `[]T`.
+static Type *sema_type_slice(SemaContext *ctx, AstType *type) {
+  Type *base_type = sema_type(ctx, type->slice.elem_type);
+
+  if (base_type == type_error) {
+    return type_error;
+  }
+
+  if (type_is_void(base_type)) {
+    sema_error(ctx, type->loc, "Cannot make a slice of 'void'");
+    return type_error;
+  }
+
+  return type_slice_of(&ctx->comp_unit->arena, base_type);
+}
+
 // Resolves a written type to a Type: no type means void.
 Type *sema_type(SemaContext *ctx, AstType *type) {
   if (!type) {
@@ -1521,6 +1663,8 @@ Type *sema_type(SemaContext *ctx, AstType *type) {
     return sema_type_pointer(ctx, type);
   case AST_TYPE_ARRAY:
     return sema_type_array(ctx, type);
+  case AST_TYPE_SLICE:
+    return sema_type_slice(ctx, type);
   }
 
   sema_error(ctx, type->loc, "Unknown type kind");

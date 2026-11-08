@@ -1,5 +1,6 @@
 #include "types.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,8 +64,17 @@ bool type_is_array(Type *type) {
   return type->kind == TYPE_KIND_ARRAY;
 }
 
+bool type_is_slice(Type *type) {
+  if (!type) return false;
+  return type->kind == TYPE_KIND_SLICE;
+}
+
+bool type_is_array_like(Type *type) {
+  return type_is_array(type) || type_is_slice(type);
+}
+
 bool type_is_aggregate(Type *type) {
-  return type_is_array(type);
+  return type_is_array(type) || type_is_slice(type);
 }
 
 // Compiler-internal types
@@ -113,6 +123,10 @@ bool type_equals(Type *a, Type *b) {
     return a->array.length == b->array.length && type_equals(a->array.elem_type, b->array.elem_type);
   }
 
+  if (type_is_slice(a) && type_is_slice(b)) {
+    return type_equals(a->slice.elem_type, b->slice.elem_type);
+  }
+
   return false;
 }
 
@@ -150,6 +164,10 @@ bool type_can_widen_to(Type *from, Type *to) {
   // An array converts to a pointer to its elements (or to `*void`); it is already represented by its address.
   if (type_is_array(from) && type_is_pointer(to)) {
     return type_is_void(to->pointer.base_type) || type_equals(from->array.elem_type, to->pointer.base_type);
+  }
+
+  if (type_is_array(from) && type_is_slice(to)) {
+    return type_equals(from->array.elem_type, to->slice.elem_type);
   }
 
   return false;
@@ -207,6 +225,28 @@ Type *type_array_of(Arena *arena, Type *elem_type, uint32_t length) {
   };
 
   return array_type;
+}
+
+Type *type_slice_of(Arena *arena, Type *elem_type) {
+  size_t name_len = strlen(elem_type->name) + 3;
+  char *name = arena_alloc(arena, name_len);
+  snprintf(name, name_len, "[]%s", elem_type->name);
+
+  Type *slice_type = arena_alloc(arena, sizeof(Type));
+  *slice_type = (Type){
+    .kind = TYPE_KIND_SLICE,
+    .name = name,
+    .size = 16,
+    .slice = {.elem_type = elem_type},
+  };
+
+  return slice_type;
+}
+
+Type *type_elem(Type *type) {
+  assert(type_is_array_like(type) && "type_elem: type is neither an array nor a slice");
+
+  return type_is_array(type) ? type->array.elem_type : type->slice.elem_type;
 }
 
 Type *type_default(Type *type) {

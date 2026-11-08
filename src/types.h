@@ -32,6 +32,7 @@ typedef enum {
   // Kinds built from other types
   TYPE_KIND_POINTER,
   TYPE_KIND_ARRAY,
+  TYPE_KIND_SLICE,
   TYPE_KIND_FUNCTION,
 } TypeKind;
 
@@ -43,6 +44,10 @@ typedef struct {
   Type *elem_type;
   uint32_t length;
 } TypeArray;
+
+typedef struct {
+  Type *elem_type;
+} TypeSlice;
 
 typedef struct {
   Type *return_type;
@@ -60,6 +65,7 @@ struct Type_ {
   union {
     TypePointer pointer;
     TypeArray array;
+    TypeSlice slice;
     TypeFunction function;
   };
 };
@@ -78,6 +84,9 @@ bool type_is_float(Type *type);
 bool type_is_numeric(Type *type);
 bool type_is_pointer(Type *type);
 bool type_is_array(Type *type);
+bool type_is_slice(Type *type);
+// An array or a slice: something that can be indexed and sliced
+bool type_is_array_like(Type *type);
 // Values that are handled by the address of their storage instead of being loaded into a register
 bool type_is_aggregate(Type *type);
 
@@ -102,9 +111,13 @@ Type *type_common(Type *a, Type *b);
 
 // Building and deriving types
 // Builds the type `*base`
-Type *type_pointer_to(Arena *arena, Type *base);
+Type *type_pointer_to(Arena *arena, Type *base_type);
 // Builds the type `[length]element`
-Type *type_array_of(Arena *arena, Type *element, uint32_t length);
+Type *type_array_of(Arena *arena, Type *elem_type, uint32_t length);
+// Builds the type `[]element`
+Type *type_slice_of(Arena *arena, Type *elem_type);
+// The element type of an array or a slice
+Type *type_elem(Type *type);
 // The concrete type an untyped literal takes when nothing else decides it
 Type *type_default(Type *type);
 

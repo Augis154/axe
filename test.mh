@@ -1,24 +1,6 @@
-fn make_array(): [5]i64 {
-  var xs: [_]i64 = [1, 2, 3, 4, 5];
-
-  xs[0] = 1;
-  xs[2] = 5;
-  xs[4] = 4;
-
-  return xs;
-}
-
 fn main(): i64 {
-  var zero: [5]i64; # Zero initialized
-  var uninit: [5]i64 = undef; # Uninitialized
+  var xs: [5]i64 = [1, 2, 3, 4, 5];
+  var s: []i64 = xs;
 
-  var xs: [_]i64 = make_array();
-  var ys = [1; 10];
-
-  var zs = [
-    2: 4,
-    5: 7
-  ];
-
-  return zs[[0, 2, 4][ys[2]]];
+  return s[3];
 }

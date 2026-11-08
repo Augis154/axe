@@ -61,6 +61,8 @@ typedef enum {
   AST_EXPR_ADDR_OF,
   AST_EXPR_DEREF,
   AST_EXPR_SUBSCRIPT,
+  AST_EXPR_SLICE,
+  AST_EXPR_MEMBER,
   AST_EXPR_CALL,
 
   // Operators
@@ -142,6 +144,17 @@ typedef struct {
 } AstExprSubscript;
 
 typedef struct {
+  AstExpr *target;
+  AstExpr *start;
+  AstExpr *end;
+} AstExprSlice;
+
+typedef struct {
+  AstExpr *object;
+  const char *member;
+} AstExprMember;
+
+typedef struct {
   AstExpr *callee;
   AstExpr **arguments;
   uint32_t argument_count;
@@ -189,6 +202,8 @@ struct AstExpr_ {
     AstExprAddrOf expr_addr_of;
     AstExprDeref expr_deref;
     AstExprSubscript expr_subscript;
+    AstExprSlice expr_slice;
+    AstExprMember expr_member;
     AstExprCall expr_call;
 
     AstExprUnary expr_unary;
@@ -311,6 +326,7 @@ typedef enum {
   AST_TYPE_NAMED,
   AST_TYPE_POINTER,
   AST_TYPE_ARRAY,
+  AST_TYPE_SLICE,
 } AstTypeKind;
 
 typedef struct {
@@ -322,6 +338,10 @@ typedef struct {
   AstExpr *length_expr;
 } AstTypeArray;
 
+typedef struct {
+  AstType *elem_type;
+} AstTypeSlice;
+
 struct AstType_ {
   AstTypeKind kind;
   uint32_t id;
@@ -331,6 +351,7 @@ struct AstType_ {
     const char *named;
     AstTypePointer pointer;
     AstTypeArray array;
+    AstTypeSlice slice;
   };
 };
 

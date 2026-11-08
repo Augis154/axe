@@ -130,6 +130,23 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     printf(")");
     return;
 
+  case AST_EXPR_SLICE:
+    printf("([: ");
+    debug_print_ast_sexpr(arena, expr->expr_slice.target);
+    printf(" ");
+    debug_print_ast_sexpr(arena, expr->expr_slice.start);
+    printf(" ");
+    debug_print_ast_sexpr(arena, expr->expr_slice.end);
+    printf(")");
+    return;
+
+  case AST_EXPR_MEMBER:
+    printf("(. ");
+    debug_print_ast_sexpr(arena, expr->expr_member.object);
+    printf(" %s", expr->expr_member.member);
+    printf(")");
+    return;
+
   case AST_EXPR_CALL:
     printf("(call ");
     debug_print_ast_sexpr(arena, expr->expr_call.callee);

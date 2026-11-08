@@ -8,6 +8,7 @@
 #include "types.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,11 +16,49 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type);
 
 // Context and type helpers
 
+// The offset in bytes of the length in a slice, `{ptr, len}`; the pointer is at offset 0.
+#define SLICE_LEN_OFFSET 8
+
 static inline IrFunction *get_current_func(IrGenContext *ctx) {
   return &ctx->module->functions[ctx->current_func_idx];
 }
 
-// The id of the aggregate with the layout of array `type`, added on first use; nested arrays are flattened.
+// The id of the aggregate with these fields and alignment, added on first use.
+static uint32_t get_agg_id(IrGenContext *ctx, uint32_t alignment, const IrAggField *fields, uint32_t field_count) {
+  IrModule *module = ctx->module;
+
+  for (size_t i = 0; i < da_len(module->aggregates); i++) {
+    IrAggregate *agg = &module->aggregates[i];
+    if (da_len(agg->fields) != field_count) {
+      continue;
+    }
+
+    bool matches = true;
+    for (uint32_t j = 0; j < field_count; j++) {
+      if (agg->fields[j].count != fields[j].count || !ir_type_equals(agg->fields[j].type, fields[j].type)) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches) {
+      return i;
+    }
+  }
+
+  char *name = arena_alloc(&ctx->comp_unit->arena, 16);
+  snprintf(name, 16, "agg%zu", da_len(module->aggregates));
+
+  IrAggregate agg = {.name = name, .alignment = alignment, .fields = NULL};
+  for (uint32_t i = 0; i < field_count; i++) {
+    da_append(agg.fields, fields[i]);
+  }
+  da_append(module->aggregates, agg);
+
+  return da_len(module->aggregates) - 1;
+}
+
+// The id of the aggregate with the layout of array `type`; nested arrays are flattened.
 static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
   assert(type_is_array(type) && "get_array_agg_id: type is not an array");
 
@@ -33,23 +72,8 @@ static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
   // A bool occupies a single byte in memory, although it is an i32 in a register
   IrType element_type = type_is_bool(element) ? IR_INT(1, false) : get_ir_type(ctx, element);
 
-  IrModule *module = ctx->module;
-  for (size_t i = 0; i < da_len(module->aggregates); i++) {
-    IrAggregate *agg = &module->aggregates[i];
-    if (da_len(agg->fields) == 1 && agg->fields[0].count == count &&
-        ir_type_equals(agg->fields[0].type, element_type)) {
-      return i;
-    }
-  }
-
-  char *name = arena_alloc(&ctx->comp_unit->arena, 16);
-  snprintf(name, 16, "agg%zu", da_len(module->aggregates));
-
-  IrAggregate agg = {.name = name, .alignment = element_type.size, .fields = NULL};
-  da_append(agg.fields, ((IrAggField){.type = element_type, .count = count}));
-  da_append(module->aggregates, agg);
-
-  return da_len(module->aggregates) - 1;
+  IrAggField field = {.type = element_type, .count = count};
+  return get_agg_id(ctx, element_type.size, &field, 1);
 }
 
 // The size of the scalar an array is built from; nested arrays are flattened.
@@ -59,6 +83,14 @@ static uint32_t flat_elem_size(Type *array_type) {
     elem_type = elem_type->array.elem_type;
   }
   return elem_type->size;
+}
+
+// The id of the aggregate with the layout of a slice, `{ptr, len}`; all slices share it.
+static uint32_t get_slice_agg_id(IrGenContext *ctx, Type *type) {
+  assert(type_is_slice(type) && "get_slice_agg_id: type is not a slice");
+
+  IrAggField fields[] = {{.type = IR_PTR, .count = 1}, {.type = IR_I64, .count = 1}};
+  return get_agg_id(ctx, 8, fields, 2);
 }
 
 static IrType get_ir_type(IrGenContext *ctx, Type *type) {
@@ -90,6 +122,8 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
 
   case TYPE_KIND_ARRAY:
     return IR_AGG(get_array_agg_id(ctx, type));
+  case TYPE_KIND_SLICE:
+    return IR_AGG(get_slice_agg_id(ctx, type));
 
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
@@ -192,6 +226,38 @@ static IrReg emit_scaled_offset(IrGenContext *ctx, IrReg index_reg, int64_t elem
   return bytes_reg;
 }
 
+// The address `byte_offset` bytes past `ptr_reg`; an offset of 0 is `ptr_reg` itself.
+static IrReg emit_ptr_offset(IrGenContext *ctx, IrReg ptr_reg, int64_t byte_offset) {
+  assert(ptr_reg.id != NULL_REG.id && "emit_ptr_offset: ptr_reg is NULL");
+  assert(byte_offset >= 0 && "emit_ptr_offset: byte_offset is negative");
+
+  if (byte_offset == 0) {
+    return ptr_reg;
+  }
+
+  IrReg offset_reg = emit_int_const(ctx, byte_offset, IR_I64);
+  IrReg addr_reg = next_ir_reg(ctx, IR_PTR);
+
+  emit_ir_instr(ctx, IR_OP_ADD, .res = addr_reg, .arg1 = ptr_reg, .arg2 = offset_reg);
+
+  return addr_reg;
+}
+
+// The address of element `index_reg` of the elements at `base_reg`; the result register has the type `res_type`.
+static IrReg emit_element_addr(IrGenContext *ctx, IrReg base_reg, IrReg index_reg, int64_t elem_size, IrType res_type) {
+  assert(base_reg.id != NULL_REG.id && "emit_element_addr: base_reg is NULL");
+  assert(index_reg.id != NULL_REG.id && "emit_element_addr: index_reg is NULL");
+  assert(elem_size > 0 && "emit_element_addr: elements have no size");
+  assert((res_type.kind == IR_TYPE_PTR || res_type.kind == IR_TYPE_AGG) && "emit_element_addr: res_type is no address");
+
+  IrReg offset_reg = emit_scaled_offset(ctx, index_reg, elem_size);
+  IrReg addr_reg = next_ir_reg(ctx, res_type);
+
+  emit_ir_instr(ctx, IR_OP_ADD, .res = addr_reg, .arg1 = base_reg, .arg2 = offset_reg);
+
+  return addr_reg;
+}
+
 // Stores `value_reg` into `count` consecutive elements at `base_reg`; `count` must be at least 1.
 static void emit_fill(IrGenContext *ctx, IrReg base_reg, IrReg value_reg, Type *elem_type, uint32_t count) {
   uint32_t elem_size = elem_type->size;
@@ -245,6 +311,43 @@ static IrReg queue_entry_alloc(IrGenContext *ctx, Type *type) {
   return slot_reg;
 }
 
+// Builds a slice of type `slice_type` in a new stack slot from its data pointer and length; yields the slot's address.
+static IrReg emit_slice_value(IrGenContext *ctx, Type *slice_type, IrReg ptr_reg, IrReg len_reg) {
+  assert(type_is_slice(slice_type) && "emit_slice_value: type is not a slice");
+  assert(ptr_reg.id != NULL_REG.id && "emit_slice_value: ptr_reg is NULL");
+  assert(len_reg.id != NULL_REG.id && "emit_slice_value: len_reg is NULL");
+
+  IrReg slice_ptr = queue_entry_alloc(ctx, slice_type);
+
+  emit_ir_instr(ctx, IR_OP_STORE, .arg1 = ptr_reg, .arg2 = slice_ptr);
+
+  IrReg len_ptr = emit_ptr_offset(ctx, slice_ptr, SLICE_LEN_OFFSET);
+  emit_ir_instr(ctx, IR_OP_STORE, .arg1 = len_reg, .arg2 = len_ptr);
+
+  return slice_ptr;
+}
+
+// The data pointer of the slice at `slice_reg`.
+static IrReg emit_slice_ptr(IrGenContext *ctx, IrReg slice_reg) {
+  assert(slice_reg.id != NULL_REG.id && "emit_slice_ptr: slice_reg is NULL");
+
+  IrReg ptr_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_LOAD, .res = ptr_reg, .arg1 = slice_reg);
+
+  return ptr_reg;
+}
+
+// The length of the slice at `slice_reg`.
+static IrReg emit_slice_len(IrGenContext *ctx, IrReg slice_reg) {
+  assert(slice_reg.id != NULL_REG.id && "emit_slice_len: slice_reg is NULL");
+
+  IrReg len_ptr = emit_ptr_offset(ctx, slice_reg, SLICE_LEN_OFFSET);
+  IrReg len_reg = next_ir_reg(ctx, IR_I64);
+  emit_ir_instr(ctx, IR_OP_LOAD, .res = len_reg, .arg1 = len_ptr);
+
+  return len_reg;
+}
+
 // Conversions
 
 // IR op that converts a value of IR type `from` to IR type `to`.
@@ -268,6 +371,19 @@ static IrOp conversion_op(IrType from, IrType to) {
   return IR_OP_FTOI;
 }
 
+// Converts the array at `array_ptr` to a slice that points at it and has the array's length.
+static IrReg emit_array_to_slice(IrGenContext *ctx, IrReg array_ptr, Type *array_type, Type *slice_type) {
+  assert(type_is_array(array_type) && "emit_array_to_slice: type is not an array");
+  assert(type_is_slice(slice_type) && "emit_array_to_slice: target type is not a slice");
+  assert(type_equals(type_elem(array_type), type_elem(slice_type)) && "emit_array_to_slice: element types differ");
+
+  IrReg ptr_reg = next_ir_reg(ctx, IR_PTR);
+  emit_ir_instr(ctx, IR_OP_COPY, .res = ptr_reg, .arg1 = array_ptr);
+
+  IrReg slice_len = emit_int_const(ctx, array_type->array.length, IR_I64);
+  return emit_slice_value(ctx, slice_type, ptr_reg, slice_len);
+}
+
 // Converts `src_reg` from `from_type` to `to_type`; the same IR type needs no instruction.
 static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_type, Type *to_type) {
   IrType from_ir = get_ir_type(ctx, from_type);
@@ -275,6 +391,10 @@ static IrReg emit_cast_if_needed(IrGenContext *ctx, IrReg src_reg, Type *from_ty
 
   if (ir_type_equals(from_ir, to_ir)) {
     return src_reg;
+  }
+
+  if (type_is_array(from_type) && type_is_slice(to_type)) {
+    return emit_array_to_slice(ctx, src_reg, from_type, to_type);
   }
 
   assert(!ir_type_is_void(from_ir) && !ir_type_is_void(to_ir) && "cast between non-value types");
@@ -463,14 +583,7 @@ static IrReg emit_array_literal(IrGenContext *ctx, AstExpr *expr) {
     IrReg val_reg = emit_expression(ctx, element->value);
 
     int64_t offset = (int64_t)element->index * elem_size;
-    IrReg elem_addr_reg = arr_ptr_reg;
-
-    if (offset > 0) {
-      elem_addr_reg = next_ir_reg(ctx, IR_PTR);
-      IrReg off_reg = emit_int_const(ctx, offset, IR_I64);
-
-      emit_ir_instr(ctx, IR_OP_ADD, .res = elem_addr_reg, .arg1 = arr_ptr_reg, .arg2 = off_reg);
-    }
+    IrReg elem_addr_reg = emit_ptr_offset(ctx, arr_ptr_reg, offset);
 
     emit_store(ctx, val_reg, elem_addr_reg, elem_type);
   }
@@ -483,13 +596,13 @@ static IrReg emit_array_access(IrGenContext *ctx, AstExpr *target, AstExpr *inde
   IrReg target_reg = emit_expression(ctx, target);
   IrReg index_reg = emit_expression(ctx, index);
 
-  int64_t element_size = expr_type(ctx, target)->array.elem_type->size;
-  IrReg offset_reg = emit_scaled_offset(ctx, index_reg, element_size);
-  IrReg res = next_ir_reg(ctx, res_type);
+  Type *target_type = expr_type(ctx, target);
 
-  emit_ir_instr(ctx, IR_OP_ADD, .res = res, .arg1 = target_reg, .arg2 = offset_reg);
+  if (type_is_slice(target_type)) {
+    target_reg = emit_slice_ptr(ctx, target_reg);
+  }
 
-  return res;
+  return emit_element_addr(ctx, target_reg, index_reg, type_elem(target_type)->size, res_type);
 }
 
 // `&x` is the address of the slot of `x`, the pointer of `p.*`, or the element address of `xs[i]`.
@@ -550,6 +663,48 @@ static IrReg emit_subscript(IrGenContext *ctx, AstExpr *expr) {
   return res;
 }
 
+// Emits `xs[start:end]` for an array or a slice; a missing start is 0 and a missing end is the length of `xs`.
+static IrReg emit_slice(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_slice: expr is NULL");
+
+  Type *slice_type = expr_type(ctx, expr);
+  Type *target_type = expr_type(ctx, expr->expr_slice.target);
+  assert(type_is_array_like(target_type) && "sema allows only arrays and slices to be sliced");
+
+  bool is_array = type_is_array(target_type);
+
+  IrReg target_reg = emit_expression(ctx, expr->expr_slice.target);
+  IrReg data_reg = is_array ? target_reg : emit_slice_ptr(ctx, target_reg);
+
+  IrReg start_reg =
+    expr->expr_slice.start ? emit_expression(ctx, expr->expr_slice.start) : emit_int_const(ctx, 0, IR_I64);
+
+  IrReg end_reg;
+  if (expr->expr_slice.end) {
+    end_reg = emit_expression(ctx, expr->expr_slice.end);
+  } else if (is_array) {
+    end_reg = emit_int_const(ctx, target_type->array.length, IR_I64);
+  } else {
+    end_reg = emit_slice_len(ctx, target_reg);
+  }
+
+  IrReg base_reg = emit_element_addr(ctx, data_reg, start_reg, type_elem(slice_type)->size, IR_PTR);
+
+  IrReg len_reg = next_ir_reg(ctx, IR_I64);
+  emit_ir_instr(ctx, IR_OP_SUB, .res = len_reg, .arg1 = end_reg, .arg2 = start_reg);
+
+  return emit_slice_value(ctx, slice_type, base_reg, len_reg);
+}
+
+// Emits `object.member`; sema rejects member access for now, so this is not reached.
+static IrReg emit_member(IrGenContext *ctx, AstExpr *expr) {
+  assert(expr && "emit_member: expr is NULL");
+
+  assert(false && "Member access is not yet implemented");
+
+  return NULL_REG;
+}
+
 // Emits a call with its argument registers; the result register has the callee's return type.
 static IrReg emit_call(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_call: expr is NULL");
@@ -605,10 +760,12 @@ static IrReg emit_pointer_arithmetic(IrGenContext *ctx, AstExpr *expr) {
   IrReg right_reg = emit_expression(ctx, right_expr);
 
   bool left_is_ptr = type_is_pointer(left_type);
+  bool right_is_ptr = type_is_pointer(right_type);
+
   Type *ptr_type = left_is_ptr ? left_type : right_type;
   int64_t element_size = ptr_type->pointer.base_type->size;
 
-  if (type_is_pointer(left_type) && type_is_pointer(right_type)) {
+  if (left_is_ptr && right_is_ptr) {
     IrReg bytes_reg = next_ir_reg(ctx, IR_I64);
 
     emit_ir_instr(ctx, IR_OP_SUB, .res = bytes_reg, .arg1 = left_reg, .arg2 = right_reg);
@@ -757,6 +914,12 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
 
   case AST_EXPR_SUBSCRIPT:
     return emit_subscript(ctx, expr);
+
+  case AST_EXPR_SLICE:
+    return emit_slice(ctx, expr);
+
+  case AST_EXPR_MEMBER:
+    return emit_member(ctx, expr);
 
   case AST_EXPR_CALL:
     return emit_call(ctx, expr);

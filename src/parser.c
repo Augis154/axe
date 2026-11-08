@@ -436,11 +436,33 @@ static AstExpr *parse_deref(Parser *parser, AstExpr *left) {
   return deref_expr;
 }
 
-// expression '[' expression ']'  -- the '[' is already consumed.
+// expression '[' ( expression | [ expression ] ':' [ expression ] ) ']'  -- the '[' is already consumed.
+// A subscript `xs[i]`, or a slice `xs[start:end]` where either bound may be left out.
 static AstExpr *parse_subscript(Parser *parser, AstExpr *left) {
   if (!left) return NULL;
 
-  AstExpr *index = parse_expression(parser);
+  AstExpr *index = NULL;
+  if (!check(parser, TOKEN_COLON)) {
+    index = parse_expression(parser);
+  }
+
+  if (match(parser, TOKEN_COLON)) {
+    AstExpr *end_index = NULL;
+
+    if (!check(parser, TOKEN_RBRACKET)) {
+      end_index = parse_expression(parser);
+    }
+
+    consume(parser, TOKEN_RBRACKET, "Expected ']' after slice index.");
+
+    AstExpr *slice_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_SLICE, left->loc);
+    slice_expr->expr_slice.target = left;
+    slice_expr->expr_slice.start = index;
+    slice_expr->expr_slice.end = end_index;
+
+    return slice_expr;
+  }
+
   if (!index) return NULL;
 
   consume(parser, TOKEN_RBRACKET, "Expected ']' after subscript index.");
@@ -450,6 +472,22 @@ static AstExpr *parse_subscript(Parser *parser, AstExpr *left) {
   subscript_expr->expr_subscript.index = index;
 
   return subscript_expr;
+}
+
+// expression '.' IDENT  -- the '.' is already consumed.
+static AstExpr *parse_member(Parser *parser, AstExpr *left) {
+  if (!left) return NULL;
+
+  consume(parser, TOKEN_IDENT, "Expected member name after '.'.");
+
+  const char *member = parse_identifier_name(parser, parser->previous);
+  if (!member) return NULL;
+
+  AstExpr *member_expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_MEMBER, left->loc);
+  member_expr->expr_member.object = left;
+  member_expr->expr_member.member = member;
+
+  return member_expr;
 }
 
 // callee '(' [ expression { ',' expression } [ ',' ] ] ')'  -- the '(' is already consumed.
@@ -848,6 +886,16 @@ static AstType *parse_array_type(Parser *parser) {
 
   consume(parser, TOKEN_LBRACKET, "Expected '[' for array type.");
 
+  if (match(parser, TOKEN_RBRACKET)) {
+    AstType *base_type = parse_type(parser);
+    if (!base_type) return NULL;
+
+    AstType *type = ast_type_new(&parser->comp_unit->arena, AST_TYPE_SLICE, start_loc);
+    type->slice.elem_type = base_type;
+
+    return type;
+  }
+
   AstExpr *length_expr = NULL;
   if (!match(parser, TOKEN_UNDERSCORE)) {
     length_expr = parse_expression(parser);
@@ -1028,5 +1076,6 @@ static const ParseRule rules[TOKEN_COUNT] = {
   // Postfix and grouping; '(' is the call operator and also starts a parenthesised expression
   [TOKEN_LPAREN] = {PREC_POSTFIX, parse_grouping, parse_call},
   [TOKEN_LBRACKET] = {PREC_POSTFIX, parse_array_literal, parse_subscript},
+  [TOKEN_DOT] = {PREC_POSTFIX, NULL, parse_member},
   [TOKEN_DEREF] = {PREC_POSTFIX, NULL, parse_deref},
 };
