@@ -364,7 +364,16 @@ static void qbe_write_aggregates(FILE *file, const IrModule *module) {
 
     for (size_t j = 0; j < da_len(agg->fields); j++) {
       if (j > 0) fprintf(file, ", ");
-      fprintf(file, "%c %u", qbe_field_char(agg->fields[j].type), agg->fields[j].count);
+
+      IrAggField *field = &agg->fields[j];
+
+      if (field->type.kind == IR_TYPE_AGG) {
+        fprintf(file, ":%s ", module->aggregates[field->type.agg_id].name);
+      } else {
+        fprintf(file, "%c ", qbe_field_char(field->type));
+      }
+
+      fprintf(file, "%u", field->count);
     }
 
     fprintf(file, " }\n");

@@ -70,6 +70,16 @@ struct Type_ {
   };
 };
 
+// The layout of a slice is `{ptr, len}`: the offsets in bytes of its two fields
+#define SLICE_PTR_OFFSET 0
+#define SLICE_LEN_OFFSET 8
+
+// A member of a type: where it is in memory and its type
+typedef struct {
+  uint32_t offset;
+  Type *type;
+} TypeField;
+
 #define TYPE_EXTERN(kind, size, ident) extern Type *const type_##ident;
 TYPES_BUILTIN(TYPE_EXTERN)
 #undef TYPE_EXTERN
@@ -120,5 +130,9 @@ Type *type_slice_of(Arena *arena, Type *elem_type);
 Type *type_elem(Type *type);
 // The concrete type an untyped literal takes when nothing else decides it
 Type *type_default(Type *type);
+
+// Members of a type
+// Finds the member `name` of `type`; false when it has none.
+bool type_find_field(Arena *arena, Type *type, const char *name, TypeField *field);
 
 #endif // TYPES_H

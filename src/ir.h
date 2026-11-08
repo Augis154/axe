@@ -135,7 +135,8 @@ typedef struct {
 #define IR_F32 IR_FLOAT(4)
 #define IR_F64 IR_FLOAT(8)
 
-// An array is a single field; a struct has one field per member.
+// `count` consecutive values of one type, which can itself be an aggregate. An array is a single field; a slice has
+// two (pointer and length) and a struct one per member.
 typedef struct {
   IrType type;
   uint32_t count;

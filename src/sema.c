@@ -151,7 +151,7 @@ Type *sema_expr_type(const SemaContext *ctx, const AstExpr *expr) {
 }
 
 // Whether `expr` denotes a location that can be assigned to.
-static bool is_lvalue(const AstExpr *expr) {
+static bool is_lvalue(const SemaContext *ctx, const AstExpr *expr) {
   if (!expr) return false;
 
   switch (expr->kind) {
@@ -164,8 +164,10 @@ static bool is_lvalue(const AstExpr *expr) {
   case AST_EXPR_DEREF:
     return true;
 
-  case AST_EXPR_SUBSCRIPT:
-    return is_lvalue(expr->expr_subscript.target);
+  case AST_EXPR_SUBSCRIPT: {
+    const AstExpr *target = expr->expr_subscript.target;
+    return type_is_slice(sema_expr_type(ctx, target)) || is_lvalue(ctx, target);
+  }
 
   default:
     return false;
@@ -469,6 +471,13 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
     return type_error;
   }
 
+  if (hint && type_is_slice(hint)) {
+    hint = sema_array_of(ctx, expr->loc, hint->slice.elem_type, length);
+    if (hint == type_error) {
+      return type_error;
+    }
+  }
+
   Type *elem_type = NULL;
 
   if (hint) {
@@ -531,7 +540,7 @@ static Type *sema_expr_addr_of(SemaContext *ctx, AstExpr *expr) {
   AstExpr *operand = expr->expr_addr_of.operand;
   Type *operand_type = sema_expr(ctx, operand);
 
-  if (operand_type != type_error && !is_lvalue(operand)) {
+  if (operand_type != type_error && !is_lvalue(ctx, operand)) {
     sema_error(ctx, expr->loc, "Cannot take the address of %s", describe_expr(operand));
     return type_error;
   }
@@ -714,15 +723,34 @@ static Type *sema_expr_slice(SemaContext *ctx, AstExpr *expr) {
   return type_slice_of(&ctx->comp_unit->arena, type_elem(target_type));
 }
 
-// Types `object.member`; member access is parsed but not supported yet, so it is always an error.
+// Types `object.member`. The length of an array is a constant, so `xs.len` becomes an integer literal.
 static Type *sema_expr_member(SemaContext *ctx, AstExpr *expr) {
   Type *object_type = sema_expr(ctx, expr->expr_member.object);
   if (object_type == type_error) {
     return type_error;
   }
 
-  sema_error(ctx, expr->loc, "Member access is not yet supported in semantic analysis");
-  return type_error;
+  if (type_is_array(object_type) && strcmp(expr->expr_member.member, "len") == 0) {
+    int64_t length = object_type->array.length;
+
+    expr->kind = AST_EXPR_LITERAL;
+    expr->expr_literal.kind = AST_LITERAL_INT;
+    expr->expr_literal.int_value = length;
+
+    return type_i64;
+  }
+
+  TypeField field = {0};
+  bool found = type_find_field(&ctx->comp_unit->arena, object_type, expr->expr_member.member, &field);
+
+  if (!found) {
+    sema_error(ctx, expr->loc, "Type '%s' has no member named '%s'", object_type->name, expr->expr_member.member);
+    return type_error;
+  }
+
+  expr->expr_member.offset = field.offset;
+
+  return field.type;
 }
 
 // Analyses the arguments of a call that could not be resolved, so that errors inside them are still reported.
@@ -1105,7 +1133,7 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   Type *target_type = sema_expr(ctx, target);
   Type *value_type = sema_expr_hint(ctx, expr->expr_assign.value, target_type);
 
-  if (target_type != type_error && !is_lvalue(target)) {
+  if (target_type != type_error && !is_lvalue(ctx, target)) {
     sema_error(ctx, expr->loc, "Invalid assignment target: %s cannot be assigned to", describe_expr(target));
     return type_error;
   }

@@ -880,7 +880,7 @@ static AstType *parse_pointer_type(Parser *parser) {
   return type;
 }
 
-// '[' ( expression | '_' ) ']' type
+// '[' [ expression | '_' ] ']' type  -- an array, or a slice when the brackets are empty.
 static AstType *parse_array_type(Parser *parser) {
   SourceLoc start_loc = parser->current.loc;
 
@@ -974,7 +974,7 @@ AstDecl *parse_declaration(Parser *parser) {
   return NULL;
 }
 
-// type := IDENT | '*' type | '[' expression ']' type
+// type := IDENT | '*' type | '[' [ expression | '_' ] ']' type
 AstType *parse_type(Parser *parser) {
   Token token = parser->current;
 

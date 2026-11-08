@@ -16,11 +16,13 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type);
 
 // Context and type helpers
 
-// The offset in bytes of the length in a slice, `{ptr, len}`; the pointer is at offset 0.
-#define SLICE_LEN_OFFSET 8
-
 static inline IrFunction *get_current_func(IrGenContext *ctx) {
   return &ctx->module->functions[ctx->current_func_idx];
+}
+
+// The alignment in bytes of a value of IR type `type`: its size for a scalar, the layout's alignment for an aggregate.
+static inline uint32_t ir_type_alignment(IrGenContext *ctx, IrType type) {
+  return type.kind == IR_TYPE_AGG ? ctx->module->aggregates[type.agg_id].alignment : type.size;
 }
 
 // The id of the aggregate with these fields and alignment, added on first use.
@@ -73,7 +75,7 @@ static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
   IrType element_type = type_is_bool(element) ? IR_INT(1, false) : get_ir_type(ctx, element);
 
   IrAggField field = {.type = element_type, .count = count};
-  return get_agg_id(ctx, element_type.size, &field, 1);
+  return get_agg_id(ctx, ir_type_alignment(ctx, element_type), &field, 1);
 }
 
 // The size of the scalar an array is built from; nested arrays are flattened.
@@ -86,9 +88,7 @@ static uint32_t flat_elem_size(Type *array_type) {
 }
 
 // The id of the aggregate with the layout of a slice, `{ptr, len}`; all slices share it.
-static uint32_t get_slice_agg_id(IrGenContext *ctx, Type *type) {
-  assert(type_is_slice(type) && "get_slice_agg_id: type is not a slice");
-
+static uint32_t get_slice_agg_id(IrGenContext *ctx) {
   IrAggField fields[] = {{.type = IR_PTR, .count = 1}, {.type = IR_I64, .count = 1}};
   return get_agg_id(ctx, 8, fields, 2);
 }
@@ -123,7 +123,7 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
   case TYPE_KIND_ARRAY:
     return IR_AGG(get_array_agg_id(ctx, type));
   case TYPE_KIND_SLICE:
-    return IR_AGG(get_slice_agg_id(ctx, type));
+    return IR_AGG(get_slice_agg_id(ctx));
 
   case TYPE_KIND_ERROR:
   case TYPE_KIND_VOID:
@@ -258,6 +258,18 @@ static IrReg emit_element_addr(IrGenContext *ctx, IrReg base_reg, IrReg index_re
   return addr_reg;
 }
 
+// Loads the field of type `field_type` that is `field_offset` bytes into the aggregate at `object_reg`.
+static IrReg emit_field_load(IrGenContext *ctx, IrReg object_reg, uint32_t field_offset, Type *field_type) {
+  assert(object_reg.id != NULL_REG.id && "emit_field_load: object_reg is NULL");
+
+  IrReg field_addr = emit_ptr_offset(ctx, object_reg, field_offset);
+
+  IrReg result_reg = next_reg(ctx, field_type);
+  emit_ir_instr(ctx, IR_OP_LOAD, .res = result_reg, .arg1 = field_addr);
+
+  return result_reg;
+}
+
 // Stores `value_reg` into `count` consecutive elements at `base_reg`; `count` must be at least 1.
 static void emit_fill(IrGenContext *ctx, IrReg base_reg, IrReg value_reg, Type *elem_type, uint32_t count) {
   uint32_t elem_size = elem_type->size;
@@ -325,27 +337,6 @@ static IrReg emit_slice_value(IrGenContext *ctx, Type *slice_type, IrReg ptr_reg
   emit_ir_instr(ctx, IR_OP_STORE, .arg1 = len_reg, .arg2 = len_ptr);
 
   return slice_ptr;
-}
-
-// The data pointer of the slice at `slice_reg`.
-static IrReg emit_slice_ptr(IrGenContext *ctx, IrReg slice_reg) {
-  assert(slice_reg.id != NULL_REG.id && "emit_slice_ptr: slice_reg is NULL");
-
-  IrReg ptr_reg = next_ir_reg(ctx, IR_PTR);
-  emit_ir_instr(ctx, IR_OP_LOAD, .res = ptr_reg, .arg1 = slice_reg);
-
-  return ptr_reg;
-}
-
-// The length of the slice at `slice_reg`.
-static IrReg emit_slice_len(IrGenContext *ctx, IrReg slice_reg) {
-  assert(slice_reg.id != NULL_REG.id && "emit_slice_len: slice_reg is NULL");
-
-  IrReg len_ptr = emit_ptr_offset(ctx, slice_reg, SLICE_LEN_OFFSET);
-  IrReg len_reg = next_ir_reg(ctx, IR_I64);
-  emit_ir_instr(ctx, IR_OP_LOAD, .res = len_reg, .arg1 = len_ptr);
-
-  return len_reg;
 }
 
 // Conversions
@@ -599,7 +590,7 @@ static IrReg emit_array_access(IrGenContext *ctx, AstExpr *target, AstExpr *inde
   Type *target_type = expr_type(ctx, target);
 
   if (type_is_slice(target_type)) {
-    target_reg = emit_slice_ptr(ctx, target_reg);
+    target_reg = emit_field_load(ctx, target_reg, SLICE_PTR_OFFSET, type_void_ptr);
   }
 
   return emit_element_addr(ctx, target_reg, index_reg, type_elem(target_type)->size, res_type);
@@ -674,7 +665,7 @@ static IrReg emit_slice(IrGenContext *ctx, AstExpr *expr) {
   bool is_array = type_is_array(target_type);
 
   IrReg target_reg = emit_expression(ctx, expr->expr_slice.target);
-  IrReg data_reg = is_array ? target_reg : emit_slice_ptr(ctx, target_reg);
+  IrReg data_reg = is_array ? target_reg : emit_field_load(ctx, target_reg, SLICE_PTR_OFFSET, type_void_ptr);
 
   IrReg start_reg =
     expr->expr_slice.start ? emit_expression(ctx, expr->expr_slice.start) : emit_int_const(ctx, 0, IR_I64);
@@ -685,7 +676,7 @@ static IrReg emit_slice(IrGenContext *ctx, AstExpr *expr) {
   } else if (is_array) {
     end_reg = emit_int_const(ctx, target_type->array.length, IR_I64);
   } else {
-    end_reg = emit_slice_len(ctx, target_reg);
+    end_reg = emit_field_load(ctx, target_reg, SLICE_LEN_OFFSET, type_i64);
   }
 
   IrReg base_reg = emit_element_addr(ctx, data_reg, start_reg, type_elem(slice_type)->size, IR_PTR);
@@ -696,13 +687,14 @@ static IrReg emit_slice(IrGenContext *ctx, AstExpr *expr) {
   return emit_slice_value(ctx, slice_type, base_reg, len_reg);
 }
 
-// Emits `object.member`; sema rejects member access for now, so this is not reached.
+// Emits `object.member` by loading the field that sema found; the length of an array is folded into a literal by sema.
 static IrReg emit_member(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_member: expr is NULL");
+  assert(!type_is_array(expr_type(ctx, expr->expr_member.object)) && "sema folds the members of an array");
 
-  assert(false && "Member access is not yet implemented");
+  IrReg object_reg = emit_expression(ctx, expr->expr_member.object);
 
-  return NULL_REG;
+  return emit_field_load(ctx, object_reg, expr->expr_member.offset, expr_type(ctx, expr));
 }
 
 // Emits a call with its argument registers; the result register has the callee's return type.

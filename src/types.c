@@ -255,3 +255,21 @@ Type *type_default(Type *type) {
   if (type == type_null) return type_void_ptr;
   return type;
 }
+
+bool type_find_field(Arena *arena, Type *type, const char *name, TypeField *field) {
+  if (type_is_slice(type)) {
+    if (strcmp(name, "ptr") == 0) {
+      field->offset = SLICE_PTR_OFFSET;
+      field->type = type_pointer_to(arena, type->slice.elem_type);
+      return true;
+    }
+    if (strcmp(name, "len") == 0) {
+      field->offset = SLICE_LEN_OFFSET;
+      field->type = type_i64;
+      return true;
+    }
+    return false;
+  }
+
+  return false;
+}

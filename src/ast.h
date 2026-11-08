@@ -152,6 +152,7 @@ typedef struct {
 typedef struct {
   AstExpr *object;
   const char *member;
+  uint32_t offset; // Filled in by sema
 } AstExprMember;
 
 typedef struct {
