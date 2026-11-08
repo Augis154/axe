@@ -11,6 +11,12 @@
 #define TYPES_BUILTIN(X)                       \
   X(TYPE_KIND_ERROR, 0, error)                 \
                                                \
+  X(TYPE_KIND_U8, 1, u8)                       \
+  X(TYPE_KIND_U16, 2, u16)                     \
+  X(TYPE_KIND_U32, 4, u32)                     \
+  X(TYPE_KIND_U64, 8, u64)                     \
+  X(TYPE_KIND_I8, 1, i8)                       \
+  X(TYPE_KIND_I16, 2, i16)                     \
   X(TYPE_KIND_I32, 4, i32)                     \
   X(TYPE_KIND_I64, 8, i64)                     \
   X(TYPE_KIND_F32, 4, f32)                     \
@@ -90,6 +96,8 @@ extern Type *const type_void_ptr;
 bool type_is_void(Type *type);
 bool type_is_bool(Type *type);
 bool type_is_integer(Type *type);
+bool type_is_signed_integer(Type *type);
+bool type_is_unsigned_integer(Type *type);
 bool type_is_float(Type *type);
 bool type_is_numeric(Type *type);
 bool type_is_pointer(Type *type);

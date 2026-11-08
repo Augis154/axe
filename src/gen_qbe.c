@@ -39,6 +39,32 @@ static inline char reg_type_char(const IrFunction *func, IrReg reg) {
   return qbe_type_char(func->reg_types[reg.id]);
 }
 
+// How an operand is treated by operations whose QBE mnemonic depends on it; the columns of the opcode tables.
+typedef enum {
+  QBE_KIND_UNSIGNED,
+  QBE_KIND_SIGNED,
+  QBE_KIND_FLOAT,
+} QbeKind;
+
+// The kind of a register's type. Pointers, and aggregates which are handled by their address, are unsigned.
+static QbeKind qbe_kind(const IrFunction *func, IrReg reg) {
+  IrType type = func->reg_types[reg.id];
+
+  switch (type.kind) {
+  case IR_TYPE_INT:
+    return type.is_signed ? QBE_KIND_SIGNED : QBE_KIND_UNSIGNED;
+  case IR_TYPE_PTR:
+  case IR_TYPE_AGG:
+    return QBE_KIND_UNSIGNED;
+  case IR_TYPE_FLOAT:
+    return QBE_KIND_FLOAT;
+  case IR_TYPE_NONE:
+    break;
+  }
+
+  UNREACHABLE("operation on a register without a type");
+}
+
 // The suffix of the QBE load that reads a value of `type` from memory; narrow integers are extended to a word.
 static const char *qbe_load_suffix(IrType type) {
   switch (type.kind) {
@@ -96,8 +122,8 @@ static void qbe_write_abi_type(FILE *file, const IrModule *module, IrType type) 
 
 // Instructions
 
-// Writes one IR instruction as QBE IL.
-static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction *func, IrInstr instr) {
+// Writes one IR instruction as QBE IL, without normalizing narrow results.
+static void qbe_write_op(FILE *file, const IrModule *module, const IrFunction *func, IrInstr instr) {
   switch (instr.op) {
   case IR_OP_NONE:
     fprintf(file, "\n");
@@ -163,17 +189,18 @@ static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction
   case IR_OP_SUB:
   case IR_OP_MUL:
   case IR_OP_DIV: {
-    static const char *op_names[] = {
-      [IR_OP_ADD] = "add",
-      [IR_OP_SUB] = "sub",
-      [IR_OP_MUL] = "mul",
-      [IR_OP_DIV] = "div",
+    static const char *op_names[][3] = {
+      [IR_OP_ADD] = {[QBE_KIND_UNSIGNED] = "add", [QBE_KIND_SIGNED] = "add", [QBE_KIND_FLOAT] = "add"},
+      [IR_OP_SUB] = {[QBE_KIND_UNSIGNED] = "sub", [QBE_KIND_SIGNED] = "sub", [QBE_KIND_FLOAT] = "sub"},
+      [IR_OP_MUL] = {[QBE_KIND_UNSIGNED] = "mul", [QBE_KIND_SIGNED] = "mul", [QBE_KIND_FLOAT] = "mul"},
+      [IR_OP_DIV] = {[QBE_KIND_UNSIGNED] = "udiv", [QBE_KIND_SIGNED] = "div", [QBE_KIND_FLOAT] = "div"},
     };
+
     fprintf(file,
             "  %%r%u =%c %s %%r%u, %%r%u\n",
             instr.res.id,
             reg_type_char(func, instr.res),
-            op_names[instr.op],
+            op_names[instr.op][qbe_kind(func, instr.arg1)],
             instr.arg1.id,
             instr.arg2.id);
     return;
@@ -186,49 +213,17 @@ static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction
   case IR_OP_CMP_GT:
   case IR_OP_CMP_LE:
   case IR_OP_CMP_GE: {
-    // Pointers are addresses, so their ordering is unsigned.
-    static const char *ptr_cmp_names[] = {
-      [IR_OP_CMP_EQ] = "ceq",
-      [IR_OP_CMP_NE] = "cne",
-      [IR_OP_CMP_LT] = "cult",
-      [IR_OP_CMP_GT] = "cugt",
-      [IR_OP_CMP_LE] = "cule",
-      [IR_OP_CMP_GE] = "cuge",
-    };
-    static const char *int_cmp_names[] = {
-      [IR_OP_CMP_EQ] = "ceq",
-      [IR_OP_CMP_NE] = "cne",
-      [IR_OP_CMP_LT] = "cslt",
-      [IR_OP_CMP_GT] = "csgt",
-      [IR_OP_CMP_LE] = "csle",
-      [IR_OP_CMP_GE] = "csge",
-    };
-    static const char *float_cmp_names[] = {
-      [IR_OP_CMP_EQ] = "ceq",
-      [IR_OP_CMP_NE] = "cne",
-      [IR_OP_CMP_LT] = "clt",
-      [IR_OP_CMP_GT] = "cgt",
-      [IR_OP_CMP_LE] = "cle",
-      [IR_OP_CMP_GE] = "cge",
+    static const char *op_names[][3] = {
+      [IR_OP_CMP_EQ] = {[QBE_KIND_UNSIGNED] = "ceq", [QBE_KIND_SIGNED] = "ceq", [QBE_KIND_FLOAT] = "ceq"},
+      [IR_OP_CMP_NE] = {[QBE_KIND_UNSIGNED] = "cne", [QBE_KIND_SIGNED] = "cne", [QBE_KIND_FLOAT] = "cne"},
+      [IR_OP_CMP_LT] = {[QBE_KIND_UNSIGNED] = "cult", [QBE_KIND_SIGNED] = "cslt", [QBE_KIND_FLOAT] = "clt"},
+      [IR_OP_CMP_GT] = {[QBE_KIND_UNSIGNED] = "cugt", [QBE_KIND_SIGNED] = "csgt", [QBE_KIND_FLOAT] = "cgt"},
+      [IR_OP_CMP_LE] = {[QBE_KIND_UNSIGNED] = "cule", [QBE_KIND_SIGNED] = "csle", [QBE_KIND_FLOAT] = "cle"},
+      [IR_OP_CMP_GE] = {[QBE_KIND_UNSIGNED] = "cuge", [QBE_KIND_SIGNED] = "csge", [QBE_KIND_FLOAT] = "cge"},
     };
 
     char op_char = reg_type_char(func, instr.arg1);
-
-    const char *cmp_name = NULL;
-    switch (func->reg_types[instr.arg1.id].kind) {
-    case IR_TYPE_INT:
-      cmp_name = int_cmp_names[instr.op];
-      break;
-    case IR_TYPE_PTR:
-      cmp_name = ptr_cmp_names[instr.op];
-      break;
-    case IR_TYPE_FLOAT:
-      cmp_name = float_cmp_names[instr.op];
-      break;
-    case IR_TYPE_NONE:
-    case IR_TYPE_AGG:
-      UNREACHABLE("comparison of a register without a scalar type");
-    }
+    const char *cmp_name = op_names[instr.op][qbe_kind(func, instr.arg1)];
 
     fprintf(file, "  %%r%u =w %s%c %%r%u, %%r%u\n", instr.res.id, cmp_name, op_char, instr.arg1.id, instr.arg2.id);
     return;
@@ -240,18 +235,23 @@ static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction
   case IR_OP_BIT_AND:
   case IR_OP_SHL:
   case IR_OP_SHR: {
-    static const char *op_names[] = {
-      [IR_OP_BIT_OR] = "or",
-      [IR_OP_BIT_XOR] = "xor",
-      [IR_OP_BIT_AND] = "and",
-      [IR_OP_SHL] = "shl",
-      [IR_OP_SHR] = "sar",
+    // Only integers (and pointers) have bitwise operations, so there is no float column
+    static const char *op_names[][2] = {
+      [IR_OP_BIT_OR] = {[QBE_KIND_UNSIGNED] = "or", [QBE_KIND_SIGNED] = "or"},
+      [IR_OP_BIT_XOR] = {[QBE_KIND_UNSIGNED] = "xor", [QBE_KIND_SIGNED] = "xor"},
+      [IR_OP_BIT_AND] = {[QBE_KIND_UNSIGNED] = "and", [QBE_KIND_SIGNED] = "and"},
+      [IR_OP_SHL] = {[QBE_KIND_UNSIGNED] = "shl", [QBE_KIND_SIGNED] = "shl"},
+      [IR_OP_SHR] = {[QBE_KIND_UNSIGNED] = "shr", [QBE_KIND_SIGNED] = "sar"},
     };
+
+    QbeKind kind = qbe_kind(func, instr.arg1);
+    assert(kind != QBE_KIND_FLOAT && "qbe_write_op: bitwise operation on a float");
+
     fprintf(file,
             "  %%r%u =%c %s %%r%u, %%r%u\n",
             instr.res.id,
             reg_type_char(func, instr.res),
-            op_names[instr.op],
+            op_names[instr.op][kind],
             instr.arg1.id,
             instr.arg2.id);
     return;
@@ -262,14 +262,18 @@ static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction
     char to_char = reg_type_char(func, instr.res);
     char from_char = reg_type_char(func, instr.arg1);
 
-    fprintf(file, "  %%r%u =%c s%ctof %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    const char sign_char = func->reg_types[instr.arg1.id].is_signed ? 's' : 'u';
+
+    fprintf(file, "  %%r%u =%c %c%ctof %%r%u\n", instr.res.id, to_char, sign_char, from_char, instr.arg1.id);
     return;
   }
   case IR_OP_FTOI: {
     char to_char = reg_type_char(func, instr.res);
     char from_char = reg_type_char(func, instr.arg1);
 
-    fprintf(file, "  %%r%u =%c %ctosi %%r%u\n", instr.res.id, to_char, from_char, instr.arg1.id);
+    const char sign_char = func->reg_types[instr.res.id].is_signed ? 's' : 'u';
+
+    fprintf(file, "  %%r%u =%c %cto%ci %%r%u\n", instr.res.id, to_char, from_char, sign_char, instr.arg1.id);
     return;
   }
 
@@ -351,6 +355,36 @@ static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction
   }
 
   UNREACHABLE("unhandled IR opcode");
+}
+
+// Writes one IR instruction as QBE IL. QBE has no registers narrower than a word, so after an operation that can leave
+// garbage above the value of a u8/i8/u16/i16, the result is extended again from its low bytes.
+static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction *func, IrInstr instr) {
+  qbe_write_op(file, module, func, instr);
+
+  switch (instr.op) {
+  case IR_OP_NEGATE:
+  case IR_OP_BIT_NOT:
+  case IR_OP_ADD:
+  case IR_OP_SUB:
+  case IR_OP_MUL:
+  case IR_OP_DIV:
+  case IR_OP_SHL:
+  case IR_OP_TRUNC:
+    break;
+  default:
+    return;
+  }
+
+  IrType res_type = func->reg_types[instr.res.id];
+  if (res_type.kind != IR_TYPE_INT || res_type.size >= 4) return;
+
+  fprintf(file,
+          "  %%r%u =w ext%c%c %%r%u\n",
+          instr.res.id,
+          res_type.is_signed ? 's' : 'u',
+          res_type.size == 1 ? 'b' : 'h',
+          instr.res.id);
 }
 
 // Aggregates and functions

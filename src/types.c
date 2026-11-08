@@ -37,9 +37,19 @@ bool type_is_bool(Type *type) {
 }
 
 bool type_is_integer(Type *type) {
+  return type_is_unsigned_integer(type) || type_is_signed_integer(type);
+}
+
+bool type_is_signed_integer(Type *type) {
   if (!type) return false;
   if (type == type_error) return true;
-  return type == type_i64 || type == type_i32 || type == type_untyped_int;
+  return type == type_i8 || type == type_i16 || type == type_i32 || type == type_i64 || type == type_untyped_int;
+}
+
+bool type_is_unsigned_integer(Type *type) {
+  if (!type) return false;
+  if (type == type_error) return true;
+  return type == type_u8 || type == type_u16 || type == type_u32 || type == type_u64 || type == type_untyped_int;
 }
 
 bool type_is_float(Type *type) {
@@ -145,7 +155,8 @@ bool type_can_widen_to(Type *from, Type *to) {
   if (from == type_untyped_float) return type_is_float(to);
 
   if (type_is_integer(from) && type_is_integer(to)) {
-    return to->size >= from->size;
+    if (type_is_signed_integer(from)) return type_is_signed_integer(to) && to->size >= from->size;
+    return type_is_unsigned_integer(to) ? to->size >= from->size : to->size > from->size;
   }
 
   if (type_is_float(from) && type_is_float(to)) {

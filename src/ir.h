@@ -126,10 +126,16 @@ typedef struct {
 #define IR_VOID ((IrType){0})
 
 #define IR_INT(bytes, sign) ((IrType){.kind = IR_TYPE_INT, .size = (bytes), .is_signed = (sign)})
-#define IR_FLOAT(bytes) ((IrType){.kind = IR_TYPE_FLOAT, .size = (bytes)})
+#define IR_FLOAT(bytes) ((IrType){.kind = IR_TYPE_FLOAT, .size = (bytes), .is_signed = true})
 #define IR_PTR ((IrType){.kind = IR_TYPE_PTR, .size = 8})
 #define IR_AGG(id) ((IrType){.kind = IR_TYPE_AGG, .agg_id = (id)})
 
+#define IR_U8 IR_INT(1, false)
+#define IR_U16 IR_INT(2, false)
+#define IR_U32 IR_INT(4, false)
+#define IR_U64 IR_INT(8, false)
+#define IR_I8 IR_INT(1, true)
+#define IR_I16 IR_INT(2, true)
 #define IR_I32 IR_INT(4, true)
 #define IR_I64 IR_INT(8, true)
 #define IR_F32 IR_FLOAT(4)

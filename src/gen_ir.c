@@ -97,6 +97,19 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
   assert(type && "expression has no type; sema did not analyse it");
 
   switch (type->kind) {
+  case TYPE_KIND_U8:
+    return IR_U8;
+  case TYPE_KIND_U16:
+    return IR_U16;
+  case TYPE_KIND_U32:
+    return IR_U32;
+  case TYPE_KIND_U64:
+    return IR_U64;
+
+  case TYPE_KIND_I8:
+    return IR_I8;
+  case TYPE_KIND_I16:
+    return IR_I16;
   case TYPE_KIND_I32:
     return IR_I32;
   case TYPE_KIND_I64:
@@ -352,7 +365,11 @@ static IrOp conversion_op(IrType from, IrType to) {
   bool to_float = ir_type_is_float(to);
 
   if (!from_float && !to_float) {
-    if (from.size <= 4 && to.size <= 4) return IR_OP_COPY;
+    if (from.size <= 4 && to.size <= 4) {
+      bool needs_extend = to.size < 4 && (from.size > to.size || from.is_signed != to.is_signed);
+      return needs_extend ? IR_OP_TRUNC : IR_OP_COPY;
+    }
+
     if (from.size >= to.size) return IR_OP_TRUNC;
     return from.is_signed ? IR_OP_SEXT : IR_OP_ZEXT;
   }
