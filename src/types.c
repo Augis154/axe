@@ -1,6 +1,9 @@
 #include "types.h"
+#include "common.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,6 +105,47 @@ bool type_is_internal(Type *type) {
 bool type_has_storage(Type *type) {
   if (!type) return false;
   return type == type_error || type->size > 0;
+}
+
+bool type_int_fits(Type *type, int64_t value) {
+  switch (type->kind) {
+  case TYPE_KIND_U8:
+    return value >= 0 && value <= UINT8_MAX;
+  case TYPE_KIND_U16:
+    return value >= 0 && value <= UINT16_MAX;
+  case TYPE_KIND_U32:
+    return value >= 0 && value <= UINT32_MAX;
+  case TYPE_KIND_U64:
+    return value >= 0;
+
+  case TYPE_KIND_I8:
+    return value >= INT8_MIN && value <= INT8_MAX;
+  case TYPE_KIND_I16:
+    return value >= INT16_MIN && value <= INT16_MAX;
+  case TYPE_KIND_I32:
+    return value >= INT32_MIN && value <= INT32_MAX;
+  case TYPE_KIND_I64:
+    return value >= INT64_MIN && value <= INT64_MAX;
+
+  case TYPE_KIND_BOOL:
+    return value == 0 || value == 1;
+
+  case TYPE_KIND_F32:
+  case TYPE_KIND_F64:
+  case TYPE_KIND_UNTYPED_INT:
+  case TYPE_KIND_UNTYPED_FLOAT:
+  case TYPE_KIND_NULL:
+  case TYPE_KIND_POINTER:
+  case TYPE_KIND_ARRAY:
+  case TYPE_KIND_SLICE:
+  case TYPE_KIND_ERROR:
+  case TYPE_KIND_VOID:
+  case TYPE_KIND_UNDEF:
+  case TYPE_KIND_FUNCTION:
+    return false;
+  }
+
+  UNREACHABLE("type_int_fits: unhandled type kind");
 }
 
 // Which operators a type supports

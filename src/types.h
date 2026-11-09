@@ -19,9 +19,10 @@
   X(TYPE_KIND_I16, 2, i16)                     \
   X(TYPE_KIND_I32, 4, i32)                     \
   X(TYPE_KIND_I64, 8, i64)                     \
+  X(TYPE_KIND_BOOL, 1, bool)                   \
+                                               \
   X(TYPE_KIND_F32, 4, f32)                     \
   X(TYPE_KIND_F64, 8, f64)                     \
-  X(TYPE_KIND_BOOL, 1, bool)                   \
                                                \
   X(TYPE_KIND_UNTYPED_INT, 8, untyped_int)     \
   X(TYPE_KIND_UNTYPED_FLOAT, 8, untyped_float) \
@@ -114,6 +115,7 @@ bool type_is_internal(Type *type);
 
 // Properties
 bool type_has_storage(Type *type);
+bool type_int_fits(Type *type, int64_t value);
 
 // Which operators a type supports
 bool type_is_comparable(Type *type);

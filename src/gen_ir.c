@@ -115,13 +115,13 @@ static IrType get_ir_type(IrGenContext *ctx, Type *type) {
   case TYPE_KIND_I64:
     return IR_I64;
 
+  case TYPE_KIND_BOOL:
+    return IR_INT(1, false);
+
   case TYPE_KIND_F32:
     return IR_F32;
   case TYPE_KIND_F64:
     return IR_F64;
-
-  case TYPE_KIND_BOOL:
-    return IR_INT(1, false);
 
   case TYPE_KIND_UNTYPED_INT:
     return IR_I32;

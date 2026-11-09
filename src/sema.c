@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -230,9 +231,114 @@ static void sema_set_expr_type(SemaContext *ctx, const AstExpr *expr, Type *type
   ctx->expr_types[expr->id] = type;
 }
 
+// Constant folding
+
+// Whether `expr` is an integer literal; its value is stored in `value`.
+static bool sema_int_literal(const AstExpr *expr, int64_t *value) {
+  if (expr->kind != AST_EXPR_LITERAL || expr->expr_literal.kind != AST_LITERAL_INT) {
+    return false;
+  }
+
+  *value = expr->expr_literal.int_value;
+  return true;
+}
+
+// Computes `op operand`; false when the result is not representable.
+static bool sema_fold_unary(UnaryOp op, int64_t operand, int64_t *result) {
+  switch (op) {
+  case UNOP_NEGATE:
+    return !__builtin_sub_overflow((int64_t)0, operand, result);
+  case UNOP_BIT_NOT:
+    *result = ~operand;
+    return true;
+
+  case UNOP_NOT:
+  case UNOP_COUNT:
+    return false;
+  }
+
+  UNREACHABLE("sema_fold_unary: unhandled operator");
+}
+
+// Computes `left op right`; false when the operator has no integer result or the result is not representable.
+static bool sema_fold_binary(BinaryOp op, int64_t left, int64_t right, int64_t *result) {
+  switch (op) {
+  case BINOP_ADD:
+    return !__builtin_add_overflow(left, right, result);
+  case BINOP_SUB:
+    return !__builtin_sub_overflow(left, right, result);
+  case BINOP_MUL:
+    return !__builtin_mul_overflow(left, right, result);
+  case BINOP_DIV:
+    if (right == 0 || (left == INT64_MIN && right == -1)) return false;
+    *result = left / right;
+    return true;
+
+  case BINOP_BIT_OR:
+    *result = left | right;
+    return true;
+  case BINOP_BIT_XOR:
+    *result = left ^ right;
+    return true;
+  case BINOP_BIT_AND:
+    *result = left & right;
+    return true;
+  case BINOP_SHL:
+    if (right < 0 || right >= 63 || left < 0 || left > (INT64_MAX >> right)) return false;
+    *result = left << right;
+    return true;
+  case BINOP_SHR:
+    if (right < 0 || right >= 64) return false;
+    *result = left >> right;
+    return true;
+
+  case BINOP_LESS:
+  case BINOP_GREATER:
+  case BINOP_EQ:
+  case BINOP_NOT_EQ:
+  case BINOP_LESS_EQ:
+  case BINOP_GREATER_EQ:
+  case BINOP_COUNT:
+    return false;
+  }
+
+  UNREACHABLE("sema_fold_binary: unhandled operator");
+}
+
+// Replaces an untyped integer unary or binary expression whose operands are integer literals by the literal of its
+// value. The operands were folded before, so a constant tree collapses from the leaves up. An expression that cannot be
+// folded, such as a division by zero or an overflow, is left as it is.
+static void sema_fold_constant(AstExpr *expr) {
+  int64_t value;
+
+  switch (expr->kind) {
+  case AST_EXPR_UNARY: {
+    int64_t operand;
+    if (!sema_int_literal(expr->expr_unary.operand, &operand)) return;
+    if (!sema_fold_unary(expr->expr_unary.op, operand, &value)) return;
+    break;
+  }
+
+  case AST_EXPR_BINARY: {
+    int64_t left, right;
+    if (!sema_int_literal(expr->expr_binary.left, &left)) return;
+    if (!sema_int_literal(expr->expr_binary.right, &right)) return;
+    if (!sema_fold_binary(expr->expr_binary.op, left, right, &value)) return;
+    break;
+  }
+
+  default:
+    return;
+  }
+
+  expr->kind = AST_EXPR_LITERAL;
+  expr->expr_literal = (AstExprLiteral){.kind = AST_LITERAL_INT, .int_value = value};
+}
+
 // Implicit conversions
 
-// Gives an untyped expression (and the untyped operands it is built from) a concrete type.
+// Gives an untyped expression (and the untyped operands it is built from) a concrete type. An integer literal must fit
+// the integer type it takes.
 static void sema_concretize(SemaContext *ctx, AstExpr *expr, Type *target) {
   if (!type_is_untyped(sema_expr_type(ctx, expr))) {
     return;
@@ -241,6 +347,15 @@ static void sema_concretize(SemaContext *ctx, AstExpr *expr, Type *target) {
   sema_set_expr_type(ctx, expr, target);
 
   switch (expr->kind) {
+  case AST_EXPR_LITERAL: {
+    int64_t value;
+    if (type_is_integer(target) && !type_is_internal(target) && sema_int_literal(expr, &value) &&
+        !type_int_fits(target, value)) {
+      sema_error(ctx, expr->loc, "Value %ld does not fit in '%s'", value, target->name);
+    }
+    break;
+  }
+
   case AST_EXPR_UNARY:
     sema_concretize(ctx, expr->expr_unary.operand, target);
     break;
@@ -580,24 +695,6 @@ static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
   return operand_type->pointer.base_type;
 }
 
-// Whether `expr` is an integer literal, possibly negated; its value is stored in `value`.
-static bool const_int_value(AstExpr *expr, int64_t *value) {
-  if (expr->kind == AST_EXPR_LITERAL && expr->expr_literal.kind == AST_LITERAL_INT) {
-    *value = expr->expr_literal.int_value;
-    return true;
-  }
-
-  if (expr->kind == AST_EXPR_UNARY && expr->expr_unary.op == UNOP_NEGATE) {
-    int64_t operand;
-    if (const_int_value(expr->expr_unary.operand, &operand)) {
-      *value = -operand;
-      return true;
-    }
-  }
-
-  return false;
-}
-
 // Types `xs[i]`: the target must be an array or a slice and the index an integer, which is converted to i64.
 static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
   Type *target_type = sema_expr(ctx, expr->expr_subscript.target);
@@ -618,7 +715,7 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
   }
 
   int64_t index_value;
-  bool index_is_const = const_int_value(expr->expr_subscript.index, &index_value);
+  bool index_is_const = sema_int_literal(expr->expr_subscript.index, &index_value);
 
   if (target_type->kind == TYPE_KIND_ARRAY && index_is_const &&
       (index_value < 0 || (uint64_t)index_value >= target_type->array.length)) {
@@ -664,7 +761,7 @@ static bool sema_check_slice_bounds(SemaContext *ctx, AstExpr *expr, Type *targe
   bool is_const[2] = {false, false};
 
   for (int i = 0; i < 2; i++) {
-    if (!bounds[i] || !const_int_value(bounds[i], &values[i])) {
+    if (!bounds[i] || !sema_int_literal(bounds[i], &values[i])) {
       continue;
     }
 
@@ -945,6 +1042,12 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
     if (!common_type) {
       sema_error(
         ctx, expr->loc, "Incompatible types for arithmetic (got '%s' and '%s')", left_type->name, right_type->name);
+      return type_error;
+    }
+
+    int64_t divisor;
+    if (expr->expr_binary.op == BINOP_DIV && sema_int_literal(expr->expr_binary.right, &divisor) && divisor == 0) {
+      sema_error(ctx, expr->expr_binary.right->loc, "Division by zero");
       return type_error;
     }
 
@@ -1231,6 +1334,10 @@ Type *sema_expr(SemaContext *ctx, AstExpr *expr) {
   assert(result_type && "every expression kind produces a type");
 
   sema_set_expr_type(ctx, expr, result_type);
+
+  if (result_type == type_untyped_int) {
+    sema_fold_constant(expr);
+  }
 
   return result_type;
 }
