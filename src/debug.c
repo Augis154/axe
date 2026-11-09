@@ -54,6 +54,15 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
     case AST_LITERAL_FLOAT:
       printf("%f", expr->expr_literal.float_value);
       return;
+    case AST_LITERAL_CHAR:
+      if (expr->expr_literal.code_point >= 32 && expr->expr_literal.code_point < 127)
+        printf("'%c'", (char)expr->expr_literal.code_point);
+      else
+        printf("'U+%04X'", expr->expr_literal.code_point);
+      return;
+    case AST_LITERAL_STRING:
+      printf("\"%.*s\"", expr->expr_literal.string_value.length, expr->expr_literal.string_value.data);
+      return;
     case AST_LITERAL_TRUE:
       printf("true");
       return;
@@ -65,12 +74,6 @@ void debug_print_ast_sexpr(Arena *arena, AstExpr *expr) {
       return;
     case AST_LITERAL_UNDEF:
       printf("undef");
-      return;
-    case AST_LITERAL_CHAR:
-      printf("'%c'", expr->expr_literal.char_value);
-      return;
-    case AST_LITERAL_STRING:
-      printf("\"%s\"", expr->expr_literal.string_value);
       return;
     }
     printf("<unknown literal type>");
@@ -355,6 +358,11 @@ void debug_print_ir_function(IrFunction *func) {
 
     case IR_OP_LOAD_FLOAT:
       printf("%zu: r%u:%s = %g\n", i, instr->res.id, reg_type_name(func, instr->res), instr->float_lit);
+      continue;
+
+    case IR_OP_GLOBAL_ADDR:
+      printf(
+        "%zu: r%u:%s = GLOBAL_ADDR data[%ld]\n", i, instr->res.id, reg_type_name(func, instr->res), instr->int_lit);
       continue;
 
     case IR_OP_COPY:

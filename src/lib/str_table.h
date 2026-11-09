@@ -18,6 +18,7 @@ typedef uint32_t hash_t;
 
 typedef struct STNode {
   char *key;
+  size_t key_len;
   hash_t hash;
   void *value;
 } STNode;

@@ -42,25 +42,37 @@
       "name": "comment.line.number-sign.moth",
       "match": "#.*$"
     },
+    "escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.moth",
+          "match": "\\\\(?:[nrt0\\\\'\"]|x[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]{1,6}\\})"
+        },
+        {
+          "name": "invalid.illegal.escape.moth",
+          "match": "\\\\."
+        }
+      ]
+    },
     "string": {
       "name": "string.quoted.double.moth",
       "begin": "\"",
       "end": "\"",
       "patterns": [
         {
-          "name": "constant.character.escape.moth",
-          "match": "\\\\."
+          "include": "#escape"
         }
       ]
     },
     "char": {
       "name": "string.quoted.single.moth",
-      "match": "'(\\\\.|[^'\\\\])'",
-      "captures": {
-        "0": {
-          "name": "string.quoted.single.moth"
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "include": "#escape"
         }
-      }
+      ]
     },
     "number": {
       "patterns": [
@@ -112,6 +124,10 @@
           "match": "\\bnull\\b"
         },
         {
+          "name": "constant.language.undef.moth",
+          "match": "\\bundef\\b"
+        },
+        {
           "name": "constant.language.boolean.moth",
           "match": "\\b(true|false)\\b"
         }
@@ -119,7 +135,7 @@
     },
     "type": {
       "name": "support.type.primitive.moth",
-      "match": "\\b(i32|i64|f32|f64|bool|void)\\b"
+      "match": "\\b(u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|bool|void)\\b"
     },
     "func_call": {
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",

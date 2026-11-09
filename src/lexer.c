@@ -126,7 +126,7 @@ static Token match_next(Lexer *lex, char expected, TokenKind if_next, TokenKind 
   return new_token(lex, otherwise);
 }
 
-// Number and identifier scanning
+// Number, identifier and quoted literal scanning
 
 static Token number(Lexer *lex) {
   // Hex numbers
@@ -194,6 +194,24 @@ static Token identifier(Lexer *lex) {
   }
 
   return new_token(lex, TOKEN_IDENT);
+}
+
+// Scans a quoted literal up to and including the closing `end` quote; a backslash skips the next character.
+static Token quoted(Lexer *lex, char end, TokenKind kind) {
+  while (true) {
+    char c = peek(lex);
+
+    if (c == '\0') return error_token(lex, "Unterminated string");
+    if (c == end) break;
+
+    if (c == '\\') advance(lex);
+    if (peek(lex) == '\0') return error_token(lex, "Unterminated string");
+
+    advance(lex);
+  }
+  advance(lex);
+
+  return new_token(lex, kind);
 }
 
 // Lexer public functions
@@ -277,6 +295,12 @@ Token lexer_get_token(Lexer *lex) {
       return new_token(lex, TOKEN_SHR);
     }
     return match_next(lex, '=', TOKEN_GREATER_EQ, TOKEN_GREATER);
+
+  case '\'':
+    return quoted(lex, '\'', TOKEN_CHAR);
+
+  case '"':
+    return quoted(lex, '"', TOKEN_STRING);
 
   default:
     if (is_digit(c)) {

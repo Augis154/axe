@@ -115,6 +115,7 @@ bool type_is_internal(Type *type);
 
 // Properties
 bool type_has_storage(Type *type);
+// Whether the integer `value` is representable in the integer type `type`
 bool type_int_fits(Type *type, int64_t value);
 
 // Which operators a type supports

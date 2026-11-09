@@ -235,12 +235,28 @@ static void sema_set_expr_type(SemaContext *ctx, const AstExpr *expr, Type *type
 
 // Whether `expr` is an integer literal; its value is stored in `value`.
 static bool sema_int_literal(const AstExpr *expr, int64_t *value) {
-  if (expr->kind != AST_EXPR_LITERAL || expr->expr_literal.kind != AST_LITERAL_INT) {
+  if (expr->kind != AST_EXPR_LITERAL) {
     return false;
   }
 
-  *value = expr->expr_literal.int_value;
-  return true;
+  switch (expr->expr_literal.kind) {
+  case AST_LITERAL_INT:
+    *value = expr->expr_literal.int_value;
+    return true;
+  case AST_LITERAL_CHAR:
+    *value = expr->expr_literal.code_point;
+    return true;
+
+  case AST_LITERAL_FLOAT:
+  case AST_LITERAL_STRING:
+  case AST_LITERAL_TRUE:
+  case AST_LITERAL_FALSE:
+  case AST_LITERAL_NULL:
+  case AST_LITERAL_UNDEF:
+    return false;
+  }
+
+  UNREACHABLE("sema_int_literal: unhandled literal kind");
 }
 
 // Computes `op operand`; false when the result is not representable.
@@ -305,9 +321,7 @@ static bool sema_fold_binary(BinaryOp op, int64_t left, int64_t right, int64_t *
   UNREACHABLE("sema_fold_binary: unhandled operator");
 }
 
-// Replaces an untyped integer unary or binary expression whose operands are integer literals by the literal of its
-// value. The operands were folded before, so a constant tree collapses from the leaves up. An expression that cannot be
-// folded, such as a division by zero or an overflow, is left as it is.
+// Replaces an untyped integer expression whose operands are integer literals by the literal of its value.
 static void sema_fold_constant(AstExpr *expr) {
   int64_t value;
 
@@ -351,7 +365,13 @@ static void sema_concretize(SemaContext *ctx, AstExpr *expr, Type *target) {
     int64_t value;
     if (type_is_integer(target) && !type_is_internal(target) && sema_int_literal(expr, &value) &&
         !type_int_fits(target, value)) {
-      sema_error(ctx, expr->loc, "Value %ld does not fit in '%s'", value, target->name);
+      if (expr->expr_literal.kind != AST_LITERAL_CHAR) {
+        sema_error(ctx, expr->loc, "Value %ld does not fit in '%s'", value, target->name);
+      } else if (value >= 32 && value < 127) {
+        sema_error(ctx, expr->loc, "Character '%c' (%ld) does not fit in '%s'", (char)value, value, target->name);
+      } else {
+        sema_error(ctx, expr->loc, "Character U+%04lX does not fit in '%s'", value, target->name);
+      }
     }
     break;
   }
@@ -427,6 +447,10 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
     return type_untyped_int;
   case AST_LITERAL_FLOAT:
     return type_untyped_float;
+  case AST_LITERAL_CHAR:
+    return type_untyped_int;
+  case AST_LITERAL_STRING:
+    return type_slice_of(&ctx->comp_unit->arena, type_u8);
 
   case AST_LITERAL_TRUE:
   case AST_LITERAL_FALSE:
@@ -436,11 +460,6 @@ static Type *sema_expr_literal(SemaContext *ctx, AstExpr *expr) {
     return type_null;
   case AST_LITERAL_UNDEF:
     return type_undef;
-
-  case AST_LITERAL_CHAR:
-  case AST_LITERAL_STRING:
-    sema_error(ctx, expr->loc, "Literal type not yet supported in semantic analysis");
-    return type_error;
   }
 
   sema_error(ctx, expr->loc, "Unknown literal type");

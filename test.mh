@@ -1,6 +1,9 @@
 fn main(): i64 {
+  var c: i8 = 'A';
+  var str: []u8 = "Hello, World!";
+
   var xs: [5]i64 = [1, 2, 3, 4, 5];
   var s: []i64 = xs[1:3];
 
-  return s.len;
+  return str.len;
 }

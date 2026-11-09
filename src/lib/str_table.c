@@ -77,7 +77,7 @@ static STNode *find_entry(STNode *nodes, size_t capacity, const char *key, size_
       if (tombstone == NULL) {
         tombstone = node;
       }
-    } else if (node->hash == hash && strncmp(node->key, key, len) == 0 && node->key[len] == '\0') {
+    } else if (node->hash == hash && node->key_len == len && memcmp(node->key, key, len) == 0) {
       return node;
     }
 
@@ -151,6 +151,7 @@ void st_set_len(StrTable *st, const char *key, size_t len, void *value) {
     assert(key_copy != NULL && "Memory allocation in st_set_len failed");
 
     node->key = key_copy;
+    node->key_len = len;
     node->hash = hash;
     st->size++;
   }
@@ -189,6 +190,7 @@ void *st_remove_len(StrTable *st, const char *key, size_t len) {
 
   free(node->key);
   node->key = TOMBSTONE;
+  node->key_len = 0;
   node->value = NULL;
   st->size--;
   st->tombstones++;
@@ -216,6 +218,7 @@ const char *st_intern_len(StrTable *st, const char *key, size_t len) {
   assert(interned != NULL && "Memory allocation in st_intern_len failed");
 
   node->key = interned;
+  node->key_len = len;
   node->hash = hash;
   node->value = interned;
   st->size++;

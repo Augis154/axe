@@ -79,14 +79,14 @@ typedef enum {
   AST_LITERAL_INT,
   AST_LITERAL_FLOAT,
 
+  AST_LITERAL_CHAR,
+  AST_LITERAL_STRING,
+
   AST_LITERAL_TRUE,
   AST_LITERAL_FALSE,
 
   AST_LITERAL_NULL,
   AST_LITERAL_UNDEF,
-
-  AST_LITERAL_CHAR,
-  AST_LITERAL_STRING,
 } AstLiteralKind;
 
 typedef struct {
@@ -94,8 +94,11 @@ typedef struct {
   union {
     int64_t int_value;
     double float_value;
-    char char_value;
-    const char *string_value;
+    uint32_t code_point;
+    struct {
+      const char *data;
+      uint32_t length;
+    } string_value;
   };
 } AstExprLiteral;
 

@@ -93,6 +93,27 @@ static uint32_t get_slice_agg_id(IrGenContext *ctx) {
   return get_agg_id(ctx, 8, fields, 2);
 }
 
+// The id of the data item with these bytes and alignment, added on first use. Items with the same size and contents
+// are shared.
+static uint32_t get_data_id(IrGenContext *ctx, uint8_t *bytes, uint32_t size, uint32_t alignment) {
+  IrModule *module = ctx->module;
+
+  for (size_t i = 0; i < da_len(module->data); i++) {
+    IrData *data = &module->data[i];
+    if (data->size == size && memcmp(data->bytes, bytes, size) == 0) {
+      return i;
+    }
+  }
+
+  char *name = arena_alloc(&ctx->comp_unit->arena, 16);
+  snprintf(name, 16, "data%zu", da_len(module->data));
+
+  IrData data = {.name = name, .bytes = bytes, .size = size, .alignment = alignment};
+  da_append(module->data, data);
+
+  return da_len(module->data) - 1;
+}
+
 static IrType get_ir_type(IrGenContext *ctx, Type *type) {
   assert(type && "expression has no type; sema did not analyse it");
 
@@ -493,51 +514,68 @@ static IrOp get_binary_ir_op(BinaryOp op) {
   UNREACHABLE("unhandled binary operator");
 }
 
+// The id of the data item for a string literal: its `len` bytes and the zero byte that follows them. `data` must be
+// NUL-terminated, as strings from the intern table are.
+static uint32_t get_string_data_id(IrGenContext *ctx, const char *data, uint32_t len) {
+  return get_data_id(ctx, (uint8_t *)data, len + 1, 1);
+}
+
+// Yields a slice of the string's data and its length, which does not count the terminating zero byte.
+static IrReg emit_string_literal(IrGenContext *ctx, AstExpr *expr) {
+  const char *data = expr->expr_literal.string_value.data;
+  uint32_t length = expr->expr_literal.string_value.length;
+
+  uint32_t data_id = get_string_data_id(ctx, data, length);
+
+  IrReg ptr_reg = next_reg(ctx, type_void_ptr);
+  emit_ir_instr(ctx, IR_OP_GLOBAL_ADDR, .res = ptr_reg, .int_lit = data_id);
+
+  IrReg len_reg = emit_int_const(ctx, length, IR_I64);
+
+  return emit_slice_value(ctx, expr_type(ctx, expr), ptr_reg, len_reg);
+}
+
+// The value of an integer, character, bool or null literal.
+static int64_t literal_int_value(const AstExprLiteral *literal) {
+  switch (literal->kind) {
+  case AST_LITERAL_INT:
+    return literal->int_value;
+  case AST_LITERAL_CHAR:
+    return literal->code_point;
+  case AST_LITERAL_TRUE:
+    return 1;
+  case AST_LITERAL_FALSE:
+  case AST_LITERAL_NULL:
+    return 0;
+
+  case AST_LITERAL_UNDEF:
+    UNREACHABLE("a declaration skips its undef initializer");
+  case AST_LITERAL_FLOAT:
+  case AST_LITERAL_STRING:
+    UNREACHABLE("literal_int_value: the literal has no integer value");
+  }
+
+  UNREACHABLE("unhandled literal kind");
+}
+
+// Emits a literal: a number, character or bool is a constant in a register; a string is a slice of data.
 static IrReg emit_literal(IrGenContext *ctx, AstExpr *expr) {
   assert(expr && "emit_literal: expr is NULL");
 
   AstExprLiteral *literal = &expr->expr_literal;
 
-  switch (literal->kind) {
-  case AST_LITERAL_INT:
-  case AST_LITERAL_FLOAT:
-  case AST_LITERAL_TRUE:
-  case AST_LITERAL_FALSE:
-  case AST_LITERAL_NULL:
-    break;
-  case AST_LITERAL_UNDEF:
-    UNREACHABLE("a declaration skips its undef initializer");
-  case AST_LITERAL_CHAR:
-    UNREACHABLE("sema rejects char literals");
-  case AST_LITERAL_STRING:
-    UNREACHABLE("sema rejects string literals");
+  if (literal->kind == AST_LITERAL_STRING) {
+    return emit_string_literal(ctx, expr);
   }
 
   Type *type = expr_type(ctx, expr);
   IrReg res = next_reg(ctx, type);
 
   if (ir_type_is_float(get_ir_type(ctx, type))) {
-    double float_value = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal->int_value;
+    double float_value = literal->kind == AST_LITERAL_FLOAT ? literal->float_value : (double)literal_int_value(literal);
     emit_ir_instr(ctx, IR_OP_LOAD_FLOAT, .res = res, .float_lit = float_value);
   } else {
-    int64_t int_value;
-
-    switch (literal->kind) {
-    case AST_LITERAL_INT:
-      int_value = literal->int_value;
-      break;
-    case AST_LITERAL_TRUE:
-    case AST_LITERAL_FALSE:
-      int_value = literal->kind == AST_LITERAL_TRUE ? 1 : 0;
-      break;
-    case AST_LITERAL_NULL:
-      int_value = 0;
-      break;
-    default:
-      UNREACHABLE("sema rejects non-numeric literals");
-    }
-
-    emit_ir_instr(ctx, IR_OP_LOAD_INT, .res = res, .int_lit = int_value);
+    emit_ir_instr(ctx, IR_OP_LOAD_INT, .res = res, .int_lit = literal_int_value(literal));
   }
 
   return res;
@@ -1245,6 +1283,7 @@ void gen_ir_free(IrGenContext *ctx) {
     da_free(ctx->module->aggregates[i].fields);
   }
 
+  da_free(ctx->module->data);
   da_free(ctx->module->aggregates);
   da_free(ctx->module->functions);
   da_free(ctx->symbol_to_reg);

@@ -2,12 +2,15 @@
 
 #include "ast.h"
 #include "common.h"
+#include "lib/arena.h"
 #include "lib/array.h"
 #include "token.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef enum {
   PREC_NONE = 0,
@@ -141,6 +144,217 @@ static void synchronize_top_level(Parser *parser) {
   }
 }
 
+// Literal decoding functions
+
+// The value of the hexadecimal digit `c`, or -1 when it is not one.
+static int8_t hex_value(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// Decodes the UTF-8 character at *cursor into a code point and advances past it. Returns false for a truncated
+// sequence, a stray continuation byte, an overlong form, a surrogate or a value above U+10FFFF.
+static bool decode_utf8_char(const char **cursor, const char *end, uint32_t *code_point) {
+  const uint8_t *bytes = (const uint8_t *)*cursor;
+
+  size_t length;
+  uint32_t min_value;
+
+  if (bytes[0] < 0x80) {
+    length = 1;
+    min_value = 0;
+    *code_point = bytes[0];
+  } else if ((bytes[0] & 0xE0) == 0xC0) {
+    length = 2;
+    min_value = 0x80;
+    *code_point = bytes[0] & 0x1F;
+  } else if ((bytes[0] & 0xF0) == 0xE0) {
+    length = 3;
+    min_value = 0x800;
+    *code_point = bytes[0] & 0x0F;
+  } else if ((bytes[0] & 0xF8) == 0xF0) {
+    length = 4;
+    min_value = 0x10000;
+    *code_point = bytes[0] & 0x07;
+  } else {
+    return false;
+  }
+
+  if ((size_t)(end - *cursor) < length) return false;
+
+  for (size_t i = 1; i < length; i++) {
+    if ((bytes[i] & 0xC0) != 0x80) return false;
+    *code_point = (*code_point << 6) | (bytes[i] & 0x3F);
+  }
+
+  if (*code_point < min_value || *code_point > 0x10FFFF) return false;
+  if (*code_point >= 0xD800 && *code_point <= 0xDFFF) return false;
+
+  *cursor += length;
+  return true;
+}
+
+// Writes the UTF-8 encoding of `code_point` to `out`, which has room for 4 bytes, and returns its length.
+static size_t encode_utf8_char(uint32_t code_point, char *out) {
+  if (code_point < 0x80) {
+    out[0] = (char)code_point;
+    return 1;
+  }
+
+  if (code_point < 0x800) {
+    out[0] = (char)(0xC0 | (code_point >> 6));
+    out[1] = (char)(0x80 | (code_point & 0x3F));
+    return 2;
+  }
+
+  if (code_point < 0x10000) {
+    out[0] = (char)(0xE0 | (code_point >> 12));
+    out[1] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+    out[2] = (char)(0x80 | (code_point & 0x3F));
+    return 3;
+  }
+
+  out[0] = (char)(0xF0 | (code_point >> 18));
+  out[1] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+  out[2] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+  out[3] = (char)(0x80 | (code_point & 0x3F));
+  return 4;
+}
+
+// Decodes the `{XXXX}` of a `\u{XXXX}` escape (1 to 6 hex digits of a Unicode scalar value) at *cursor into
+// `code_point` and advances past it. Returns false when it is malformed, a surrogate or above U+10FFFF.
+static bool decode_unicode_escape(const char **cursor, const char *end, uint32_t *code_point) {
+  const char *current = *cursor;
+
+  if (current >= end || *current != '{') return false;
+  current++;
+
+  uint32_t value = 0;
+  size_t digits = 0;
+
+  while (current < end && *current != '}') {
+    int8_t digit = hex_value(*current);
+    if (digit < 0 || digits == 6) return false;
+
+    value = (value << 4) | (uint32_t)digit;
+    digits++;
+    current++;
+  }
+
+  if (current >= end || digits == 0) return false;
+  if (value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) return false;
+
+  *cursor = current + 1;
+  *code_point = value;
+  return true;
+}
+
+// Decodes the escape sequence that follows a '\\' at *cursor into `value` and advances past it. Returns false after an
+// error. `is_unicode` tells whether `value` is a code point (`\u{...}`) and not a single byte or character.
+static bool decode_escape(Parser *parser, const char **cursor, const char *end, uint32_t *value, bool *is_unicode) {
+  *is_unicode = false;
+
+  if (*cursor >= end) {
+    error_at(parser, parser->previous, "Invalid escape sequence");
+    return false;
+  }
+
+  char c = *(*cursor)++;
+
+  switch (c) {
+  case 'n':
+    *value = '\n';
+    return true;
+  case 'r':
+    *value = '\r';
+    return true;
+  case 't':
+    *value = '\t';
+    return true;
+  case '\\':
+    *value = '\\';
+    return true;
+  case '\'':
+    *value = '\'';
+    return true;
+  case '"':
+    *value = '"';
+    return true;
+  case '0':
+    *value = '\0';
+    return true;
+
+  case 'x': {
+    if (end - *cursor < 2) break;
+
+    int8_t high = hex_value((*cursor)[0]);
+    int8_t low = hex_value((*cursor)[1]);
+    if (high < 0 || low < 0) break;
+
+    *cursor += 2;
+    *value = (uint32_t)(high << 4 | low);
+    return true;
+  }
+
+  case 'u':
+    if (!decode_unicode_escape(cursor, end, value)) break;
+
+    *is_unicode = true;
+    return true;
+
+  default:
+    break;
+  }
+
+  error_at(parser, parser->previous, "Invalid escape sequence");
+  return false;
+}
+
+// Decodes the escapes and validates the UTF-8 of a string's text into an arena buffer; NULL after an error.
+static const char *escape_str(Parser *parser, const char *str, size_t str_len, size_t *escaped_len) {
+  // No escape or character takes more bytes in the result than in the source, so str_len is enough
+  char *esc_str = arena_alloc(&parser->comp_unit->arena, str_len);
+  size_t esc_len = 0;
+
+  const char *cursor = str;
+  const char *end = str + str_len;
+
+  while (cursor < end) {
+    if (*cursor != '\\') {
+      const char *start = cursor;
+      uint32_t code_point;
+
+      if (!decode_utf8_char(&cursor, end, &code_point)) {
+        error_at(parser, parser->previous, "Invalid UTF-8 in string literal");
+        return NULL;
+      }
+
+      memcpy(esc_str + esc_len, start, (size_t)(cursor - start));
+      esc_len += (size_t)(cursor - start);
+      continue;
+    }
+
+    cursor++;
+
+    uint32_t value;
+    bool is_unicode;
+    if (!decode_escape(parser, &cursor, end, &value, &is_unicode)) {
+      return NULL;
+    }
+
+    if (is_unicode) {
+      esc_len += encode_utf8_char(value, esc_str + esc_len);
+    } else {
+      esc_str[esc_len++] = (char)value;
+    }
+  }
+
+  *escaped_len = esc_len;
+  return esc_str;
+}
+
 // Expression parsing functions
 
 // expression := prefix { infix expression }  -- keeps parsing infix operators of at least `precedence`.
@@ -266,16 +480,7 @@ static AstExpr *parse_int_literal(Parser *parser) {
       continue;
     }
 
-    int8_t digit = -1;
-
-    if (c >= '0' && c <= '9') {
-      digit = c - '0';
-    } else if (c >= 'a' && c <= 'f') {
-      digit = c - 'a' + 10;
-    } else if (c >= 'A' && c <= 'F') {
-      digit = c - 'A' + 10;
-    }
-
+    int8_t digit = hex_value(c);
     if (digit < 0 || digit >= base) {
       error_at(parser, token, "Invalid character in integer literal.");
       return NULL;
@@ -296,6 +501,65 @@ static AstExpr *parse_float_literal(Parser *parser) {
   AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
   expr->expr_literal.kind = AST_LITERAL_FLOAT;
   expr->expr_literal.float_value = strtod(parser->previous.lexeme, NULL);
+
+  return expr;
+}
+
+// CHAR  -- a single UTF-8 character or escape sequence between single quotes; the value is its code point.
+static AstExpr *parse_char_literal(Parser *parser) {
+  const char *cursor = parser->previous.lexeme + 1;
+  const char *end = parser->previous.lexeme + parser->previous.lexeme_len - 1;
+
+  if (cursor == end) {
+    error_at(parser, parser->previous, "Empty character literal");
+    return NULL;
+  }
+
+  uint32_t code_point;
+
+  if (*cursor == '\\') {
+    cursor++;
+
+    bool is_unicode;
+    if (!decode_escape(parser, &cursor, end, &code_point, &is_unicode)) {
+      return NULL;
+    }
+  } else if (!decode_utf8_char(&cursor, end, &code_point)) {
+    error_at(parser, parser->previous, "Invalid UTF-8 in character literal");
+    return NULL;
+  }
+
+  if (cursor != end) {
+    error_at(parser, parser->previous, "A character literal must hold a single character");
+    return NULL;
+  }
+
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
+  expr->expr_literal.kind = AST_LITERAL_CHAR;
+  expr->expr_literal.code_point = code_point;
+
+  return expr;
+}
+
+static AstExpr *parse_string_literal(Parser *parser) {
+  size_t str_len = parser->previous.lexeme_len;
+
+  ArenaMark mark = arena_mark(&parser->comp_unit->arena);
+
+  size_t escaped_len;
+  const char *string_data = escape_str(parser, parser->previous.lexeme + 1, str_len - 2, &escaped_len);
+  if (string_data == NULL) {
+    arena_rollback(&parser->comp_unit->arena, mark);
+    return NULL;
+  }
+
+  string_data = st_intern_len(&parser->comp_unit->intern_table, string_data, escaped_len);
+  arena_rollback(&parser->comp_unit->arena, mark);
+
+  AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
+  expr->expr_literal.kind = AST_LITERAL_STRING;
+  expr->expr_literal.string_value.data = string_data;
+  expr->expr_literal.string_value.length = escaped_len;
 
   return expr;
 }
@@ -1028,6 +1292,8 @@ static const ParseRule rules[TOKEN_COUNT] = {
   [TOKEN_IDENT] = {PREC_NONE, parse_identifier, NULL},
   [TOKEN_INT] = {PREC_NONE, parse_int_literal, NULL},
   [TOKEN_FLOAT] = {PREC_NONE, parse_float_literal, NULL},
+  [TOKEN_CHAR] = {PREC_NONE, parse_char_literal, NULL},
+  [TOKEN_STRING] = {PREC_NONE, parse_string_literal, NULL},
 
   [TOKEN_TRUE] = {PREC_NONE, parse_keyword_literal, NULL},
   [TOKEN_FALSE] = {PREC_NONE, parse_keyword_literal, NULL},

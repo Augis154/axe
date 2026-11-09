@@ -11,6 +11,7 @@ typedef enum {
   // Define a register from a constant or another register
   IR_OP_LOAD_INT,
   IR_OP_LOAD_FLOAT,
+  IR_OP_GLOBAL_ADDR,
   IR_OP_COPY,
 
   // Memory: stack slots and access through an address
@@ -155,6 +156,15 @@ typedef struct {
   IrAggField *fields;
 } IrAggregate;
 
+// A named blob of initialized memory, emitted as a QBE `data` item
+typedef struct {
+  const char *name;
+  const uint8_t *bytes;
+  uint32_t size; // In bytes, without any terminator that bytes carries
+  uint32_t alignment;
+  bool is_const; // Read-only data
+} IrData;
+
 typedef struct {
   const char *name;
   IrType return_type;
@@ -167,8 +177,9 @@ typedef struct {
 } IrFunction;
 
 typedef struct {
-  IrFunction *functions;
   IrAggregate *aggregates;
+  IrData *data;
+  IrFunction *functions;
 } IrModule;
 
 // Type helpers

@@ -142,6 +142,13 @@ static void qbe_write_op(FILE *file, const IrModule *module, const IrFunction *f
     return;
   }
 
+  case IR_OP_GLOBAL_ADDR: {
+    char type_char = reg_type_char(func, instr.res);
+    const char *name = module->data[instr.int_lit].name;
+    fprintf(file, "  %%r%u =%c copy $%s\n", instr.res.id, type_char, name);
+    return;
+  }
+
   case IR_OP_COPY: {
     char type_char = reg_type_char(func, instr.res);
     fprintf(file, "  %%r%u =%c copy %%r%u\n", instr.res.id, type_char, instr.arg1.id);
@@ -387,7 +394,7 @@ static void qbe_write_instr(FILE *file, const IrModule *module, const IrFunction
           instr.res.id);
 }
 
-// Aggregates and functions
+// Aggregates, data and functions
 
 // Writes `type :name = align N { ... }` for every aggregate.
 static void qbe_write_aggregates(FILE *file, const IrModule *module) {
@@ -411,6 +418,21 @@ static void qbe_write_aggregates(FILE *file, const IrModule *module) {
     }
 
     fprintf(file, " }\n");
+  }
+}
+
+// Writes `data $name = align N { b ... }` for every data item, one byte at a time.
+static void qbe_write_data(FILE *file, const IrModule *module) {
+  for (size_t i = 0; i < da_len(module->data); i++) {
+    const IrData *data = &module->data[i];
+
+    fprintf(file, "data $%s = align %u { b ", data->name, data->alignment);
+
+    for (size_t j = 0; j < data->size; j++) {
+      fprintf(file, "%d ", data->bytes[j]);
+    }
+
+    fprintf(file, "}\n");
   }
 }
 
@@ -454,6 +476,7 @@ bool generate_qbe(const char *filename, const IrModule *module) {
   fprintf(file, "# Generated QBE IR\n");
 
   qbe_write_aggregates(file, module);
+  qbe_write_data(file, module);
 
   for (size_t i = 0; i < da_len(module->functions); i++) {
     qbe_write_function(file, module, &module->functions[i]);
