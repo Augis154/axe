@@ -95,6 +95,8 @@ typedef struct {
   const char *callee;
   IrReg *args;
   uint32_t arg_count;
+  uint32_t fixed_count; // The arguments before the `...` marker of a variadic callee
+  bool is_variadic;
 } IrCall;
 
 typedef struct {

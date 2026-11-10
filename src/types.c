@@ -136,7 +136,7 @@ const char *type_display_name(Type *type) {
     return type->name;
   }
 
-  UNREACHABLE("unhandled type kind");
+  UNREACHABLE("type_display_name: unhandled type kind");
 }
 
 bool type_int_fits(Type *type, int64_t value) {

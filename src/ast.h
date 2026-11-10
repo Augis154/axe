@@ -310,6 +310,7 @@ typedef struct {
   AstStmt *body;
 
   bool is_extern;
+  bool is_variadic;
 
   Symbol *symbol; // Filled in by sema
 } AstDeclFunction;

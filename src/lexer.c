@@ -44,6 +44,14 @@ static inline char advance(Lexer *l) {
   return c;
 }
 
+// Consumes the next character if it is `expected`.
+static bool match(Lexer *lex, char expected) {
+  if (peek(lex) != expected) return false;
+
+  advance(lex);
+  return true;
+}
+
 static inline bool is_alpha(char c) {
   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c == '_');
 }
@@ -115,15 +123,6 @@ static Token error_token(Lexer *lex, const char *message) {
   token.lexeme = strdup(message);
   token.lexeme_len = strlen(message);
   return token;
-}
-
-static Token match_next(Lexer *lex, char expected, TokenKind if_next, TokenKind otherwise) {
-  if (peek(lex) == expected) {
-    advance(lex);
-    return new_token(lex, if_next);
-  }
-
-  return new_token(lex, otherwise);
 }
 
 // Number, identifier and quoted literal scanning
@@ -282,28 +281,32 @@ Token lexer_get_token(Lexer *lex) {
 
   // Tokens that lookahead
   case '.':
-    return match_next(lex, '*', TOKEN_DEREF, TOKEN_DOT);
+    if (match(lex, '*')) return new_token(lex, TOKEN_DEREF);
+    if (!match(lex, '.')) return new_token(lex, TOKEN_DOT);
+    if (!match(lex, '.')) return new_token(lex, TOKEN_DOTDOT);
+    return new_token(lex, TOKEN_ELLIPSIS);
+
   case '&':
-    return match_next(lex, '&', TOKEN_AND, TOKEN_AMP);
+    if (match(lex, '&')) return new_token(lex, TOKEN_AND);
+    return new_token(lex, TOKEN_AMP);
   case '|':
-    return match_next(lex, '|', TOKEN_OR, TOKEN_PIPE);
+    if (match(lex, '|')) return new_token(lex, TOKEN_OR);
+    return new_token(lex, TOKEN_PIPE);
 
   case '=':
-    return match_next(lex, '=', TOKEN_EQ, TOKEN_ASSIGN);
+    if (match(lex, '=')) return new_token(lex, TOKEN_EQ);
+    return new_token(lex, TOKEN_ASSIGN);
   case '!':
-    return match_next(lex, '=', TOKEN_NOT_EQ, TOKEN_BANG);
+    if (match(lex, '=')) return new_token(lex, TOKEN_NOT_EQ);
+    return new_token(lex, TOKEN_BANG);
   case '<':
-    if (peek(lex) == '<') {
-      advance(lex);
-      return new_token(lex, TOKEN_SHL);
-    }
-    return match_next(lex, '=', TOKEN_LESS_EQ, TOKEN_LESS);
+    if (match(lex, '<')) return new_token(lex, TOKEN_SHL);
+    if (match(lex, '=')) return new_token(lex, TOKEN_LESS_EQ);
+    return new_token(lex, TOKEN_LESS);
   case '>':
-    if (peek(lex) == '>') {
-      advance(lex);
-      return new_token(lex, TOKEN_SHR);
-    }
-    return match_next(lex, '=', TOKEN_GREATER_EQ, TOKEN_GREATER);
+    if (match(lex, '>')) return new_token(lex, TOKEN_SHR);
+    if (match(lex, '=')) return new_token(lex, TOKEN_GREATER_EQ);
+    return new_token(lex, TOKEN_GREATER);
 
   case '\'':
     return quoted(lex, '\'', TOKEN_CHAR);

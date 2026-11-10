@@ -605,7 +605,7 @@ static AstExpr *parse_keyword_literal(Parser *parser) {
     expr->expr_literal.kind = AST_LITERAL_UNDEF;
     break;
   default:
-    UNREACHABLE("not a keyword literal");
+    UNREACHABLE("parse_keyword_literal: not a keyword literal");
   }
 
   return expr;
@@ -1076,8 +1076,8 @@ static AstStmt *parse_while_statement(Parser *parser) {
 
 // Declaration parsing functions
 
-// [ 'extern' ] 'fn' IDENT '(' [ IDENT ':' type { ',' IDENT ':' type } [ ',' ] ] ')' [ ':' type ] ( block | ';' )
-// The ';' form is only for 'extern'; parse_extern_declaration has already consumed that keyword.
+// [ 'extern' ] 'fn' IDENT '(' [ param { ',' param } [ ',' '...' | ',' ] ] ')' [ ':' type ] ( block | ';' )
+// The ';' form and the '...' parameter are only for 'extern', whose keyword parse_extern_declaration has consumed.
 static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
   SourceLoc start_loc = parser->current.loc;
 
@@ -1090,9 +1090,23 @@ static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
   consume(parser, TOKEN_LPAREN, "Expected '(' after function name.");
 
   AstParam *params = NULL;
+  bool is_variadic = false;
 
   while (!check(parser, TOKEN_RPAREN) && !check(parser, TOKEN_EOF)) {
     SourceLoc param_loc = parser->current.loc;
+
+    if (match(parser, TOKEN_ELLIPSIS)) {
+      if (!is_extern) {
+        error_at(parser, parser->previous, "Only extern functions can be variadic");
+      }
+
+      if (da_len(params) < 1) {
+        error_at(parser, parser->previous, "At least 1 regular argument is required for variadic functions");
+      }
+
+      is_variadic = true;
+      break;
+    }
 
     consume(parser, TOKEN_IDENT, "Expected parameter name in function declaration.");
     const char *param_name = parse_identifier_name(parser, parser->previous);
@@ -1152,6 +1166,7 @@ static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
   decl->decl_function.param_count = param_count;
 
   decl->decl_function.is_extern = is_extern;
+  decl->decl_function.is_variadic = is_variadic;
 
   return decl;
 }

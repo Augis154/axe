@@ -62,7 +62,7 @@ static QbeKind qbe_kind(const IrFunction *func, IrReg reg) {
     break;
   }
 
-  UNREACHABLE("operation on a register without a type");
+  UNREACHABLE("qbe_kind: operation on a register without a type");
 }
 
 // The suffix of the QBE load that reads a value of `type` from memory; narrow integers are extended to a word.
@@ -81,7 +81,7 @@ static const char *qbe_load_suffix(IrType type) {
     break;
   }
 
-  UNREACHABLE("load of a value without a scalar type");
+  UNREACHABLE("qbe_load_suffix: load of a value without a scalar type");
 }
 
 // The suffix of the QBE store that writes a value of `type`; only the low bytes of a narrow integer are written.
@@ -106,7 +106,7 @@ static char qbe_field_char(IrType type) {
     break;
   }
 
-  UNREACHABLE("aggregate field without a scalar type");
+  UNREACHABLE("qbe_field_char: aggregate field without a scalar type");
 }
 
 // Writes the type of a value crossing a call boundary: `:name` for an aggregate
@@ -342,11 +342,14 @@ static void qbe_write_op(FILE *file, const IrModule *module, const IrFunction *f
 
     for (uint32_t i = 0; i < instr.call.arg_count; i++) {
       if (i > 0) fprintf(file, ", ");
+      if (instr.call.is_variadic && i == instr.call.fixed_count) fprintf(file, "..., ");
 
       IrReg arg_reg = instr.call.args[i];
       qbe_write_abi_type(file, module, func->reg_types[arg_reg.id]);
       fprintf(file, " %%r%u", arg_reg.id);
     }
+
+    if (instr.call.is_variadic && instr.call.arg_count == instr.call.fixed_count) fprintf(file, ", ...");
 
     fprintf(file, ")\n");
     return;
@@ -361,7 +364,7 @@ static void qbe_write_op(FILE *file, const IrModule *module, const IrFunction *f
     return;
   }
 
-  UNREACHABLE("unhandled IR opcode");
+  UNREACHABLE("qbe_write_op: unhandled IR opcode");
 }
 
 // Writes one IR instruction as QBE IL. QBE has no registers narrower than a word, so after an operation that can leave

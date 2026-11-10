@@ -1,16 +1,18 @@
 extern fn putchar(c: i32): i32;
-extern fn puts(str: *u8): i32;
+extern fn printf(fmt: *u8, ...): i32;
 
 fn main(): i64 {
   var c: i8 = 'A';
   var str: []u8 = "Hello, World!";
 
   var xs: [5]i64 = [1, 2, 3, 4, 5];
-  var s: []i64 = xs[1:3];
+  var s: []u8 = str[7:];
 
   putchar(c);
   putchar('\n');
-  puts(str.ptr);
+
+  printf("Test %d, %f\n".ptr, xs[1], 420.69);
+  printf("Hello, %s\n".ptr, s.ptr);
 
   return str.len;
 }

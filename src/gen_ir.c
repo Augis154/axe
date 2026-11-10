@@ -466,10 +466,10 @@ static IrOp get_unary_ir_op(UnaryOp op) {
     return IR_OP_BIT_NOT;
 
   case UNOP_COUNT:
-    UNREACHABLE("UNOP_COUNT is not a valid operator");
+    UNREACHABLE("get_unary_ir_op: UNOP_COUNT is not a valid operator");
   }
 
-  UNREACHABLE("unhandled unary operator");
+  UNREACHABLE("get_unary_ir_op: unhandled unary operator");
 }
 
 static IrOp get_binary_ir_op(BinaryOp op) {
@@ -508,10 +508,10 @@ static IrOp get_binary_ir_op(BinaryOp op) {
     return IR_OP_SHR;
 
   case BINOP_COUNT:
-    UNREACHABLE("BINOP_COUNT is not a valid operator");
+    UNREACHABLE("get_binary_ir_op: BINOP_COUNT is not a valid operator");
   }
 
-  UNREACHABLE("unhandled binary operator");
+  UNREACHABLE("get_binary_ir_op: unhandled binary operator");
 }
 
 // The id of the data item for a string literal: its `len` bytes and the zero byte that follows them. `data` must be
@@ -549,13 +549,13 @@ static int64_t literal_int_value(const AstExprLiteral *literal) {
     return 0;
 
   case AST_LITERAL_UNDEF:
-    UNREACHABLE("a declaration skips its undef initializer");
+    UNREACHABLE("literal_int_value: a declaration skips its undef initializer");
   case AST_LITERAL_FLOAT:
   case AST_LITERAL_STRING:
     UNREACHABLE("literal_int_value: the literal has no integer value");
   }
 
-  UNREACHABLE("unhandled literal kind");
+  UNREACHABLE("literal_int_value: unhandled literal kind");
 }
 
 // Emits a literal: a number, character or bool is a constant in a register; a string is a slice of data.
@@ -759,6 +759,11 @@ static IrReg emit_call(IrGenContext *ctx, AstExpr *expr) {
   IrReg *arg_regs = NULL;
   uint32_t arg_count = expr->expr_call.argument_count;
 
+  AstExpr *callee = expr->expr_call.callee;
+  assert(callee->expr_identifier.symbol && "emit_call: sema did not resolve the callee");
+
+  const TypeFunction *func_type = &callee->expr_identifier.symbol->type->function;
+
   if (arg_count > 0) {
     arg_regs = arena_alloc(&ctx->comp_unit->arena, sizeof(IrReg) * arg_count);
 
@@ -777,9 +782,11 @@ static IrReg emit_call(IrGenContext *ctx, AstExpr *expr) {
                 IR_OP_CALL,
                 .res = res,
                 .call = {
-                  .callee = expr->expr_call.callee->expr_identifier.name,
+                  .callee = callee->expr_identifier.name,
                   .args = arg_regs,
                   .arg_count = arg_count,
+                  .is_variadic = func_type->is_variadic,
+                  .fixed_count = func_type->param_count,
                 });
 
   return res;
@@ -885,7 +892,7 @@ static IrReg emit_logical_op(IrGenContext *ctx, AstExpr *expr) {
   }
 
   default:
-    UNREACHABLE("unhandled logical operator");
+    UNREACHABLE("emit_logical_op: unhandled logical operator");
   }
 
   emit_ir_instr(ctx, IR_OP_LABEL, .target = right_label);
@@ -987,10 +994,10 @@ static IrReg emit_expression(IrGenContext *ctx, AstExpr *expr) {
     return emit_assignment(ctx, expr);
 
   case AST_EXPR_INVALID:
-    UNREACHABLE("AST_EXPR_INVALID reached IR generation");
+    UNREACHABLE("emit_expression: AST_EXPR_INVALID reached IR generation");
   }
 
-  UNREACHABLE("unhandled expression kind");
+  UNREACHABLE("emit_expression: unhandled expression kind");
 }
 
 // Statement handling
@@ -1164,10 +1171,10 @@ static void emit_statement(IrGenContext *ctx, AstStmt *stmt) {
     return emit_stmt_while(ctx, stmt);
 
   case AST_STMT_INVALID:
-    UNREACHABLE("AST_STMT_INVALID reached IR generation");
+    UNREACHABLE("emit_statement: AST_STMT_INVALID reached IR generation");
   }
 
-  UNREACHABLE("unhandled statement kind");
+  UNREACHABLE("emit_statement: unhandled statement kind");
 }
 
 // Declaration handling
@@ -1247,10 +1254,10 @@ static void emit_decl(IrGenContext *ctx, AstDecl *decl) {
     return emit_decl_function(ctx, decl);
 
   case AST_DECL_INVALID:
-    UNREACHABLE("AST_DECL_INVALID reached IR generation");
+    UNREACHABLE("emit_decl: AST_DECL_INVALID reached IR generation");
   }
 
-  UNREACHABLE("unhandled declaration kind");
+  UNREACHABLE("emit_decl: unhandled declaration kind");
 }
 
 // IR generation public functions

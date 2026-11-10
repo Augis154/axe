@@ -219,7 +219,7 @@ static const char *describe_expr(const AstExpr *expr) {
     return "an invalid expression";
   }
 
-  UNREACHABLE("unhandled expression kind");
+  UNREACHABLE("describe_expr: unhandled expression kind");
 }
 
 // Nodes created during sema (implicit casts) have ids past the table, so it grows on demand.
@@ -892,7 +892,48 @@ static void sema_call_arguments(SemaContext *ctx, AstExpr *expr) {
   }
 }
 
-// Types a call: the callee must be a function and each argument converts to its parameter type.
+// The type a variadic argument of `type` is passed as, with the C default promotions; NULL when it cannot be passed.
+// `type` is concrete: untyped arguments are defaulted first.
+static Type *variadic_promoted_type(Type *type) {
+  switch (type->kind) {
+  case TYPE_KIND_U8:
+  case TYPE_KIND_U16:
+  case TYPE_KIND_I8:
+  case TYPE_KIND_I16:
+  case TYPE_KIND_I32:
+  case TYPE_KIND_BOOL:
+    return type_i32;
+  case TYPE_KIND_U32:
+    return type_u32;
+  case TYPE_KIND_U64:
+    return type_u64;
+  case TYPE_KIND_I64:
+    return type_i64;
+
+  case TYPE_KIND_F32:
+  case TYPE_KIND_F64:
+    return type_f64;
+
+  case TYPE_KIND_POINTER:
+    return type;
+
+  case TYPE_KIND_UNTYPED_INT:
+  case TYPE_KIND_UNTYPED_FLOAT:
+  case TYPE_KIND_NULL:
+  case TYPE_KIND_ARRAY:
+  case TYPE_KIND_SLICE:
+  case TYPE_KIND_ERROR:
+  case TYPE_KIND_VOID:
+  case TYPE_KIND_UNDEF:
+  case TYPE_KIND_FUNCTION:
+    return NULL;
+  }
+
+  UNREACHABLE("variadic_promoted_type: unhandled type kind");
+}
+
+// Types a call: the callee must be a function and each argument converts to its parameter type. The extra arguments of
+// a variadic callee are promoted as in C.
 static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   AstExpr *callee = expr->expr_call.callee;
 
@@ -924,20 +965,25 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
 
   TypeFunction *func_type = &func_sym->type->function;
 
-  if (expr->expr_call.argument_count != func_type->param_count) {
+  bool is_variadic = func_type->is_variadic;
+  uint32_t fixed_count = func_type->param_count;
+  uint32_t arg_count = expr->expr_call.argument_count;
+
+  if (is_variadic ? arg_count < fixed_count : arg_count != fixed_count) {
     sema_error(ctx,
                expr->loc,
-               "Function '%s' expects %u arguments, but %u were provided",
+               "Function '%s' expects %s%u arguments, but %u were provided",
                callee->expr_identifier.name,
-               func_type->param_count,
-               expr->expr_call.argument_count);
+               is_variadic ? "at least " : "",
+               fixed_count,
+               arg_count);
     sema_call_arguments(ctx, expr);
     return type_error;
   }
 
   bool arguments_ok = true;
 
-  for (uint32_t i = 0; i < expr->expr_call.argument_count; i++) {
+  for (uint32_t i = 0; i < fixed_count; i++) {
     AstExpr *arg_expr = expr->expr_call.arguments[i];
     Type *expected_type = func_type->param_types[i];
     Type *arg_type = sema_expr_hint(ctx, arg_expr, expected_type);
@@ -960,6 +1006,25 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
     }
 
     sema_coerce(ctx, &expr->expr_call.arguments[i], expected_type);
+  }
+
+  for (uint32_t i = fixed_count; i < arg_count; i++) {
+    AstExpr *arg_expr = expr->expr_call.arguments[i];
+    Type *arg_type = sema_expr(ctx, arg_expr);
+
+    if (arg_type == type_error) {
+      arguments_ok = false;
+      continue;
+    }
+
+    Type *promoted = variadic_promoted_type(type_default(arg_type));
+    if (!promoted) {
+      sema_error(ctx, arg_expr->loc, "Cannot pass '%s' as a variadic argument", type_display_name(arg_type));
+      arguments_ok = false;
+      continue;
+    }
+
+    sema_coerce(ctx, &expr->expr_call.arguments[i], promoted);
   }
 
   return arguments_ok ? func_type->return_type : type_error;
@@ -1703,6 +1768,7 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
         .return_type = return_type,
         .param_types = param_types,
         .param_count = func_decl->param_count,
+        .is_variadic = func_decl->is_variadic,
       },
   };
 

@@ -297,7 +297,10 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
 
   switch (decl->kind) {
   case AST_DECL_FUNCTION:
-    printf("%sFunction Declaration: %s\n", decl->decl_function.is_extern ? "Extern " : "", decl->decl_function.name);
+    printf("%s%sFunction Declaration: %s\n",
+           decl->decl_function.is_extern ? "Extern " : "",
+           decl->decl_function.is_variadic ? "Variadic " : "",
+           decl->decl_function.name);
     if (decl->decl_function.is_extern) return;
 
     print_indent(1);
@@ -532,11 +535,12 @@ void debug_print_ir_function(IrFunction *func) {
     case IR_OP_CALL:
       printf("%zu: CALL r%u:%s, %s(", i, instr->res.id, reg_type_name(func, instr->res), instr->call.callee);
       for (uint32_t j = 0; j < instr->call.arg_count; j++) {
+        if (j > 0) printf(", ");
+        if (instr->call.is_variadic && j == instr->call.fixed_count) printf("..., ");
+
         printf("r%u:%s", instr->call.args[j].id, reg_type_name(func, instr->call.args[j]));
-        if (j < instr->call.arg_count - 1) {
-          printf(", ");
-        }
       }
+      if (instr->call.is_variadic && instr->call.arg_count == instr->call.fixed_count) printf(", ...");
       printf(")\n");
       continue;
     case IR_OP_RETURN:
