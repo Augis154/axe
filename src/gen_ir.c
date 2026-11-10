@@ -22,14 +22,14 @@ static inline IrFunction *get_current_func(IrGenContext *ctx) {
 
 // The alignment in bytes of a value of IR type `type`: its size for a scalar, the layout's alignment for an aggregate.
 static inline uint32_t ir_type_alignment(IrGenContext *ctx, IrType type) {
-  return type.kind == IR_TYPE_AGG ? ctx->module->aggregates[type.agg_id].alignment : type.size;
+  return type.kind == IR_TYPE_AGG ? ctx->module->aggregates[type.agg.id].alignment : type.size;
 }
 
 // The id of the aggregate with these fields and alignment, added on first use.
-static uint32_t get_agg_id(IrGenContext *ctx, uint32_t alignment, const IrAggField *fields, uint32_t field_count) {
+static IrAggId get_agg_id(IrGenContext *ctx, uint32_t alignment, const IrAggField *fields, uint32_t field_count) {
   IrModule *module = ctx->module;
 
-  for (size_t i = 0; i < da_len(module->aggregates); i++) {
+  for (uint32_t i = 0; i < da_len(module->aggregates); i++) {
     IrAggregate *agg = &module->aggregates[i];
     if (da_len(agg->fields) != field_count) {
       continue;
@@ -44,7 +44,7 @@ static uint32_t get_agg_id(IrGenContext *ctx, uint32_t alignment, const IrAggFie
     }
 
     if (matches) {
-      return i;
+      return (IrAggId){i};
     }
   }
 
@@ -57,11 +57,11 @@ static uint32_t get_agg_id(IrGenContext *ctx, uint32_t alignment, const IrAggFie
   }
   da_append(module->aggregates, agg);
 
-  return da_len(module->aggregates) - 1;
+  return (IrAggId){(uint32_t)da_len(module->aggregates) - 1};
 }
 
 // The id of the aggregate with the layout of array `type`; nested arrays are flattened.
-static uint32_t get_array_agg_id(IrGenContext *ctx, Type *type) {
+static IrAggId get_array_agg_id(IrGenContext *ctx, Type *type) {
   assert(type_is_array(type) && "get_array_agg_id: type is not an array");
 
   uint32_t count = 1;
@@ -88,20 +88,20 @@ static uint32_t flat_elem_size(Type *array_type) {
 }
 
 // The id of the aggregate with the layout of a slice, `{ptr, len}`; all slices share it.
-static uint32_t get_slice_agg_id(IrGenContext *ctx) {
+static IrAggId get_slice_agg_id(IrGenContext *ctx) {
   IrAggField fields[] = {{.type = IR_PTR, .count = 1}, {.type = IR_I64, .count = 1}};
   return get_agg_id(ctx, 8, fields, 2);
 }
 
 // The id of the data item with these bytes and alignment, added on first use. Items with the same size and contents
 // are shared.
-static uint32_t get_data_id(IrGenContext *ctx, uint8_t *bytes, uint32_t size, uint32_t alignment) {
+static IrDataId get_data_id(IrGenContext *ctx, uint8_t *bytes, uint32_t size, uint32_t alignment) {
   IrModule *module = ctx->module;
 
-  for (size_t i = 0; i < da_len(module->data); i++) {
+  for (uint32_t i = 0; i < da_len(module->data); i++) {
     IrData *data = &module->data[i];
     if (data->size == size && memcmp(data->bytes, bytes, size) == 0) {
-      return i;
+      return (IrDataId){i};
     }
   }
 
@@ -111,7 +111,7 @@ static uint32_t get_data_id(IrGenContext *ctx, uint8_t *bytes, uint32_t size, ui
   IrData data = {.name = name, .bytes = bytes, .size = size, .alignment = alignment};
   da_append(module->data, data);
 
-  return da_len(module->data) - 1;
+  return (IrDataId){(uint32_t)da_len(module->data) - 1};
 }
 
 static IrType get_ir_type(IrGenContext *ctx, Type *type) {
@@ -516,7 +516,7 @@ static IrOp get_binary_ir_op(BinaryOp op) {
 
 // The id of the data item for a string literal: its `len` bytes and the zero byte that follows them. `data` must be
 // NUL-terminated, as strings from the intern table are.
-static uint32_t get_string_data_id(IrGenContext *ctx, const char *data, uint32_t len) {
+static IrDataId get_string_data_id(IrGenContext *ctx, const char *data, uint32_t len) {
   return get_data_id(ctx, (uint8_t *)data, len + 1, 1);
 }
 
@@ -525,10 +525,10 @@ static IrReg emit_string_literal(IrGenContext *ctx, AstExpr *expr) {
   const char *data = expr->expr_literal.string_value.data;
   uint32_t length = expr->expr_literal.string_value.length;
 
-  uint32_t data_id = get_string_data_id(ctx, data, length);
+  IrDataId data_id = get_string_data_id(ctx, data, length);
 
   IrReg ptr_reg = next_reg(ctx, type_void_ptr);
-  emit_ir_instr(ctx, IR_OP_GLOBAL_ADDR, .res = ptr_reg, .int_lit = data_id);
+  emit_ir_instr(ctx, IR_OP_GLOBAL_ADDR, .res = ptr_reg, .data = data_id);
 
   IrReg len_reg = emit_int_const(ctx, length, IR_I64);
 
@@ -1295,10 +1295,7 @@ void gen_ir(IrGenContext *ctx, AstProgram *program) {
     return;
   }
 
-  IrModule *module = arena_alloc(&ctx->comp_unit->arena, sizeof(IrModule));
-  module->functions = NULL;
-  module->aggregates = NULL;
-  ctx->module = module;
+  ctx->module = arena_calloc(&ctx->comp_unit->arena, sizeof(IrModule));
 
   for (uint32_t i = 0; i < program->decl_count; i++) {
     emit_decl(ctx, program->decls[i]);

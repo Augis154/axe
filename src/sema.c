@@ -30,9 +30,8 @@ static void sema_error(SemaContext *ctx, SourceLoc loc, const char *message, ...
 // Scope management functions
 
 static Scope *scope_enter(SemaContext *ctx, Scope *current) {
-  Scope *new_scope = arena_alloc(&ctx->comp_unit->arena, sizeof(Scope));
+  Scope *new_scope = arena_calloc(&ctx->comp_unit->arena, sizeof(Scope));
   new_scope->parent = current;
-  new_scope->symbols = NULL;
   new_scope->depth = current ? (current->depth + 1) : 0;
   return new_scope;
 }
@@ -435,7 +434,8 @@ static Type *sema_array_of(SemaContext *ctx, SourceLoc loc, Type *elem_type, uin
     return type_error;
   }
 
-  return type_array_of(&ctx->comp_unit->arena, elem_type, length);
+  // The size check above keeps the length within 32 bits.
+  return type_array_of(&ctx->comp_unit->arena, elem_type, (uint32_t)length);
 }
 
 // Expression semantic analysis functions

@@ -196,16 +196,25 @@ static Token identifier(Lexer *lex) {
   return new_token(lex, TOKEN_IDENT);
 }
 
+// The error for a quoted literal that starts on `start_line` and never ends.
+static Token unterminated_token(Lexer *lex, uint32_t start_line) {
+  Token token = error_token(lex, "Unterminated string");
+  token.loc.line = start_line;
+  return token;
+}
+
 // Scans a quoted literal up to and including the closing `end` quote; a backslash skips the next character.
 static Token quoted(Lexer *lex, char end, TokenKind kind) {
+  uint32_t start_line = lex->line;
+
   while (true) {
     char c = peek(lex);
 
-    if (c == '\0') return error_token(lex, "Unterminated string");
+    if (c == '\0') return unterminated_token(lex, start_line);
     if (c == end) break;
 
     if (c == '\\') advance(lex);
-    if (peek(lex) == '\0') return error_token(lex, "Unterminated string");
+    if (peek(lex) == '\0') return unterminated_token(lex, start_line);
 
     advance(lex);
   }

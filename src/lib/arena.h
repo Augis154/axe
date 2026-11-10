@@ -27,6 +27,10 @@ typedef struct {
 } Arena;
 
 void *arena_alloc(Arena *a, size_t size);
+static inline void *arena_calloc(Arena *a, size_t size) {
+  return memset(arena_alloc(a, size), 0, size);
+}
+
 void arena_free(Arena *a);
 
 ArenaMark arena_mark(Arena *a);

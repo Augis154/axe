@@ -1,7 +1,5 @@
 #include "ast.h"
 
-#include <string.h>
-
 static uint32_t expr_id = 1;
 static uint32_t stmt_id = 1;
 static uint32_t decl_id = 1;
@@ -10,9 +8,8 @@ static uint32_t type_id = 1;
 // Node constructors
 
 AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc) {
-  AstExpr *expr = arena_alloc(arena, sizeof(AstExpr));
+  AstExpr *expr = arena_calloc(arena, sizeof(AstExpr));
 
-  memset(expr, 0, sizeof(AstExpr));
   expr->kind = kind;
   expr->id = expr_id++;
   expr->loc = loc;
@@ -21,9 +18,8 @@ AstExpr *ast_expr_new(Arena *arena, AstExprKind kind, SourceLoc loc) {
 }
 
 AstStmt *ast_stmt_new(Arena *arena, AstStmtKind kind, SourceLoc loc) {
-  AstStmt *stmt = arena_alloc(arena, sizeof(AstStmt));
+  AstStmt *stmt = arena_calloc(arena, sizeof(AstStmt));
 
-  memset(stmt, 0, sizeof(AstStmt));
   stmt->kind = kind;
   stmt->id = stmt_id++;
   stmt->loc = loc;
@@ -32,9 +28,8 @@ AstStmt *ast_stmt_new(Arena *arena, AstStmtKind kind, SourceLoc loc) {
 }
 
 AstDecl *ast_decl_new(Arena *arena, AstDeclKind kind, SourceLoc loc) {
-  AstDecl *decl = arena_alloc(arena, sizeof(AstDecl));
+  AstDecl *decl = arena_calloc(arena, sizeof(AstDecl));
 
-  memset(decl, 0, sizeof(AstDecl));
   decl->kind = kind;
   decl->id = decl_id++;
   decl->loc = loc;
@@ -43,9 +38,8 @@ AstDecl *ast_decl_new(Arena *arena, AstDeclKind kind, SourceLoc loc) {
 }
 
 AstType *ast_type_new(Arena *arena, AstTypeKind kind, SourceLoc loc) {
-  AstType *type = arena_alloc(arena, sizeof(AstType));
+  AstType *type = arena_calloc(arena, sizeof(AstType));
 
-  memset(type, 0, sizeof(AstType));
   type->kind = kind;
   type->id = type_id++;
   type->loc = loc;

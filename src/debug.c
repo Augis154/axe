@@ -331,7 +331,7 @@ static const char *ir_type_name(IrType type) {
   case IR_TYPE_PTR:
     return "ptr";
   case IR_TYPE_AGG:
-    snprintf(buf, 16, "agg%u", type.agg_id);
+    snprintf(buf, 16, "agg%u", type.agg.id);
     break;
   }
 
@@ -361,8 +361,7 @@ void debug_print_ir_function(IrFunction *func) {
       continue;
 
     case IR_OP_GLOBAL_ADDR:
-      printf(
-        "%zu: r%u:%s = GLOBAL_ADDR data[%ld]\n", i, instr->res.id, reg_type_name(func, instr->res), instr->int_lit);
+      printf("%zu: r%u:%s = GLOBAL_ADDR data[%u]\n", i, instr->res.id, reg_type_name(func, instr->res), instr->data.id);
       continue;
 
     case IR_OP_COPY:

@@ -112,7 +112,7 @@ static char qbe_field_char(IrType type) {
 // Writes the type of a value crossing a call boundary: `:name` for an aggregate
 static void qbe_write_abi_type(FILE *file, const IrModule *module, IrType type) {
   if (type.kind == IR_TYPE_AGG) {
-    fprintf(file, ":%s", module->aggregates[type.agg_id].name);
+    fprintf(file, ":%s", module->aggregates[type.agg.id].name);
   } else if (type.kind == IR_TYPE_INT && type.size < 4) {
     fprintf(file, "%s", qbe_load_suffix(type));
   } else {
@@ -144,7 +144,7 @@ static void qbe_write_op(FILE *file, const IrModule *module, const IrFunction *f
 
   case IR_OP_GLOBAL_ADDR: {
     char type_char = reg_type_char(func, instr.res);
-    const char *name = module->data[instr.int_lit].name;
+    const char *name = module->data[instr.data.id].name;
     fprintf(file, "  %%r%u =%c copy $%s\n", instr.res.id, type_char, name);
     return;
   }
@@ -409,7 +409,7 @@ static void qbe_write_aggregates(FILE *file, const IrModule *module) {
       IrAggField *field = &agg->fields[j];
 
       if (field->type.kind == IR_TYPE_AGG) {
-        fprintf(file, ":%s ", module->aggregates[field->type.agg_id].name);
+        fprintf(file, ":%s ", module->aggregates[field->type.agg.id].name);
       } else {
         fprintf(file, "%c ", qbe_field_char(field->type));
       }

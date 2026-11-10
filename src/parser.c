@@ -251,10 +251,10 @@ static bool decode_unicode_escape(const char **cursor, const char *end, uint32_t
   return true;
 }
 
-// Decodes the escape sequence that follows a '\\' at *cursor into `value` and advances past it. Returns false after an
-// error. `is_unicode` tells whether `value` is a code point (`\u{...}`) and not a single byte or character.
+// Decodes the escape after a '\\' at *cursor into `value` and advances past it; false after an error. `is_unicode`
+// (optional) tells whether `value` is a `\u{...}` code point rather than a byte.
 static bool decode_escape(Parser *parser, const char **cursor, const char *end, uint32_t *value, bool *is_unicode) {
-  *is_unicode = false;
+  if (is_unicode) *is_unicode = false;
 
   if (*cursor >= end) {
     error_at(parser, parser->previous, "Invalid escape sequence");
@@ -301,7 +301,7 @@ static bool decode_escape(Parser *parser, const char **cursor, const char *end, 
   case 'u':
     if (!decode_unicode_escape(cursor, end, value)) break;
 
-    *is_unicode = true;
+    if (is_unicode) *is_unicode = true;
     return true;
 
   default:
@@ -520,8 +520,7 @@ static AstExpr *parse_char_literal(Parser *parser) {
   if (*cursor == '\\') {
     cursor++;
 
-    bool is_unicode;
-    if (!decode_escape(parser, &cursor, end, &code_point, &is_unicode)) {
+    if (!decode_escape(parser, &cursor, end, &code_point, NULL)) {
       return NULL;
     }
   } else if (!decode_utf8_char(&cursor, end, &code_point)) {
@@ -541,6 +540,7 @@ static AstExpr *parse_char_literal(Parser *parser) {
   return expr;
 }
 
+// STRING  -- text between double quotes, with escape sequences; the value is its bytes.
 static AstExpr *parse_string_literal(Parser *parser) {
   size_t str_len = parser->previous.lexeme_len;
 
@@ -553,13 +553,19 @@ static AstExpr *parse_string_literal(Parser *parser) {
     return NULL;
   }
 
+  if (escaped_len > UINT32_MAX) {
+    error_at(parser, parser->previous, "String literal is too long");
+    arena_rollback(&parser->comp_unit->arena, mark);
+    return NULL;
+  }
+
   string_data = st_intern_len(&parser->comp_unit->intern_table, string_data, escaped_len);
   arena_rollback(&parser->comp_unit->arena, mark);
 
   AstExpr *expr = ast_expr_new(&parser->comp_unit->arena, AST_EXPR_LITERAL, parser->previous.loc);
   expr->expr_literal.kind = AST_LITERAL_STRING;
   expr->expr_literal.string_value.data = string_data;
-  expr->expr_literal.string_value.length = escaped_len;
+  expr->expr_literal.string_value.length = (uint32_t)escaped_len;
 
   return expr;
 }
@@ -1272,7 +1278,7 @@ AstProgram *parse_program(Parser *parser) {
     }
   }
 
-  AstProgram *program = arena_alloc(&parser->comp_unit->arena, sizeof(AstProgram));
+  AstProgram *program = arena_calloc(&parser->comp_unit->arena, sizeof(AstProgram));
 
   AstDecl **decl_array = arena_copy_array(&parser->comp_unit->arena, decls, da_len(decls), sizeof(AstDecl *));
 

@@ -79,6 +79,15 @@ typedef struct {
   uint32_t id;
 } IrLabel;
 
+// Indexes into IrModule.aggregates and IrModule.data
+typedef struct {
+  uint32_t id;
+} IrAggId;
+
+typedef struct {
+  uint32_t id;
+} IrDataId;
+
 #define NULL_REG ((IrReg){0})
 #define NULL_LABEL ((IrLabel){0})
 
@@ -98,6 +107,7 @@ typedef struct {
   union {
     int64_t int_lit;
     double float_lit;
+    IrDataId data; // GLOBAL_ADDR
     IrCall call;
     IrLabel target;
     struct {
@@ -118,9 +128,9 @@ typedef enum {
 
 typedef struct {
   IrTypeKind kind;
-  uint32_t size;   // In bytes. INT: 1, 2, 4 or 8. FLOAT: 4 or 8. PTR: 8. Unused for AGG.
-  bool is_signed;  // INT only
-  uint32_t agg_id; // AGG only: the index into IrModule.aggregates
+  uint32_t size;  // In bytes. INT: 1, 2, 4 or 8. FLOAT: 4 or 8. PTR: 8. Unused for AGG.
+  bool is_signed; // INT only
+  IrAggId agg;    // AGG only
 } IrType;
 
 // Constructors for the types
@@ -129,7 +139,7 @@ typedef struct {
 #define IR_INT(bytes, sign) ((IrType){.kind = IR_TYPE_INT, .size = (bytes), .is_signed = (sign)})
 #define IR_FLOAT(bytes) ((IrType){.kind = IR_TYPE_FLOAT, .size = (bytes), .is_signed = true})
 #define IR_PTR ((IrType){.kind = IR_TYPE_PTR, .size = 8})
-#define IR_AGG(id) ((IrType){.kind = IR_TYPE_AGG, .agg_id = (id)})
+#define IR_AGG(agg_id) ((IrType){.kind = IR_TYPE_AGG, .agg = (agg_id)})
 
 #define IR_U8 IR_INT(1, false)
 #define IR_U16 IR_INT(2, false)
@@ -193,7 +203,7 @@ static inline bool ir_type_is_float(IrType type) {
 }
 
 static inline bool ir_type_equals(IrType a, IrType b) {
-  return a.kind == b.kind && a.size == b.size && a.is_signed == b.is_signed && a.agg_id == b.agg_id;
+  return a.kind == b.kind && a.size == b.size && a.is_signed == b.is_signed && a.agg.id == b.agg.id;
 }
 
 #endif // IR_H
