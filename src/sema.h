@@ -22,7 +22,6 @@ typedef struct {
 
 typedef struct {
   AstDecl *decl;
-  bool is_extern;
 } SymbolFunction;
 
 struct Symbol_ {

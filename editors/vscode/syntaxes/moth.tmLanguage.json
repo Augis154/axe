@@ -117,7 +117,7 @@
         },
         {
           "name": "storage.type.moth",
-          "match": "\\b(var|fn)\\b"
+          "match": "\\b(var|fn|extern)\\b"
         },
         {
           "name": "constant.language.null.moth",

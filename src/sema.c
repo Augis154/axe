@@ -1641,7 +1641,7 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
   }
 
   sym->type = func_type;
-  sym->is_defined = func_decl->body != NULL;
+  sym->is_defined = !func_decl->is_extern;
   sym->function.decl = decl;
   func_decl->symbol = sym;
 }
@@ -1666,6 +1666,10 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
 
   AstDeclFunction *func_decl = &decl->decl_function;
   AstDeclFunction *prev_func = ctx->current_function;
+
+  if (func_decl->is_extern) {
+    return;
+  }
 
   ctx->current_function = func_decl;
   ctx->current_scope = scope_enter(ctx, ctx->current_scope);
@@ -1698,9 +1702,7 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
     param->symbol = sym;
   }
 
-  if (func_decl->body) {
-    sema_stmt(ctx, decl->decl_function.body);
-  }
+  sema_stmt(ctx, func_decl->body);
 
   ctx->current_scope = scope_exit(ctx->current_scope);
   ctx->current_function = prev_func;

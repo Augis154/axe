@@ -309,6 +309,8 @@ typedef struct {
   AstType *declared_return_type;
   AstStmt *body;
 
+  bool is_extern;
+
   Symbol *symbol; // Filled in by sema
 } AstDeclFunction;
 

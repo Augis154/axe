@@ -1179,6 +1179,10 @@ static void emit_decl_function(IrGenContext *ctx, AstDecl *decl) {
 
   AstDeclFunction *func_decl = &decl->decl_function;
 
+  if (func_decl->is_extern) {
+    return;
+  }
+
   ctx->next_reg = 1;
   ctx->next_label = 1;
   ctx->current_loop = NULL;

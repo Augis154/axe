@@ -297,7 +297,9 @@ void debug_print_ast_decl(Arena *arena, AstDecl *decl) {
 
   switch (decl->kind) {
   case AST_DECL_FUNCTION:
-    printf("Function Declaration: %s\n", decl->decl_function.name);
+    printf("%sFunction Declaration: %s\n", decl->decl_function.is_extern ? "Extern " : "", decl->decl_function.name);
+    if (decl->decl_function.is_extern) return;
+
     print_indent(1);
     printf("Body:\n");
     debug_print_ast_stmt(arena, decl->decl_function.body);

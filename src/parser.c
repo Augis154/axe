@@ -125,6 +125,7 @@ static void synchronize(Parser *parser) {
     case TOKEN_CONTINUE:
     case TOKEN_IF:
     case TOKEN_WHILE:
+    case TOKEN_EXTERN:
       return;
 
     default:
@@ -139,7 +140,7 @@ static void synchronize(Parser *parser) {
 static void synchronize_top_level(Parser *parser) {
   parser->panic_mode = false;
 
-  while (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_FN)) {
+  while (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_FN) && !check(parser, TOKEN_EXTERN)) {
     advance(parser);
   }
 }
@@ -1051,8 +1052,9 @@ static AstStmt *parse_while_statement(Parser *parser) {
 
 // Declaration parsing functions
 
-// 'fn' IDENT '(' [ IDENT ':' type { ',' IDENT ':' type } [ ',' ] ] ')' [ ':' type ] block
-static AstDecl *parse_function_declaration(Parser *parser) {
+// [ 'extern' ] 'fn' IDENT '(' [ IDENT ':' type { ',' IDENT ':' type } [ ',' ] ] ')' [ ':' type ] ( block | ';' )
+// The ';' form is only for 'extern'; parse_extern_declaration has already consumed that keyword.
+static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
   SourceLoc start_loc = parser->current.loc;
 
   consume(parser, TOKEN_FN, "Expected 'fn' keyword for function declaration.");
@@ -1093,6 +1095,10 @@ static AstDecl *parse_function_declaration(Parser *parser) {
 
   consume(parser, TOKEN_RPAREN, "Expected ')' after function parameters.");
 
+  AstParam *param_array = arena_copy_array(&parser->comp_unit->arena, params, da_len(params), sizeof(AstParam));
+  uint32_t param_count = da_len(params);
+  da_free(params);
+
   AstType *return_type = NULL;
   if (match(parser, TOKEN_COLON)) {
     return_type = parse_type(parser);
@@ -1101,21 +1107,44 @@ static AstDecl *parse_function_declaration(Parser *parser) {
     }
   }
 
-  AstStmt *func_body = parse_block(parser);
-  if (!func_body) return NULL;
+  AstStmt *func_body = NULL;
+
+  if (is_extern) {
+    consume(parser, TOKEN_SEMICOLON, "Expected ';' after extern function declaration.");
+  } else if (check(parser, TOKEN_SEMICOLON)) {
+    error_at(parser, parser->previous, "Function has no body; add one or declare it 'extern'.");
+    return NULL;
+  } else {
+    func_body = parse_block(parser);
+    if (!func_body) return NULL;
+  }
 
   AstDecl *decl = ast_decl_new(&parser->comp_unit->arena, AST_DECL_FUNCTION, start_loc);
   decl->decl_function.name = func_name;
   decl->decl_function.body = func_body;
   decl->decl_function.declared_return_type = return_type;
 
-  AstParam *param_array = arena_copy_array(&parser->comp_unit->arena, params, da_len(params), sizeof(AstParam));
-
   decl->decl_function.params = param_array;
-  decl->decl_function.param_count = da_len(params);
-  da_free(params);
+  decl->decl_function.param_count = param_count;
+
+  decl->decl_function.is_extern = is_extern;
 
   return decl;
+}
+
+// 'extern' function_declaration  -- a declaration without a body, defined outside this program.
+static AstDecl *parse_extern_declaration(Parser *parser) {
+  consume(parser, TOKEN_EXTERN, "Expected 'extern' keyword for extern declaration.");
+
+  switch (parser->current.kind) {
+  case TOKEN_FN:
+    return parse_function_declaration(parser, true);
+
+  default:
+    error_at(parser, parser->current, "Expected 'fn' after 'extern'.");
+  }
+
+  return NULL;
 }
 
 // Type parsing functions
@@ -1210,7 +1239,7 @@ AstStmt *parse_statement(Parser *parser) {
     return parse_variable_declaration(parser);
   case TOKEN_FN:
     error_at(parser, parser->current, "Nested functions are not supported.");
-    parse_function_declaration(parser);
+    parse_function_declaration(parser, false);
     return NULL;
 
   case TOKEN_RETURN:
@@ -1230,11 +1259,14 @@ AstStmt *parse_statement(Parser *parser) {
   }
 }
 
-// declaration := function_declaration  -- recovers to the next 'fn' on anything else.
+// declaration := function_declaration | extern_declaration  -- recovers to the next 'fn' or 'extern' on anything else.
 AstDecl *parse_declaration(Parser *parser) {
   switch (parser->current.kind) {
   case TOKEN_FN:
-    return parse_function_declaration(parser);
+    return parse_function_declaration(parser, false);
+
+  case TOKEN_EXTERN:
+    return parse_extern_declaration(parser);
 
   default:
     error_at(parser, parser->current, "Expected declaration.");
