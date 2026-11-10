@@ -107,6 +107,38 @@ bool type_has_storage(Type *type) {
   return type == type_error || type->size > 0;
 }
 
+const char *type_display_name(Type *type) {
+  switch (type->kind) {
+  case TYPE_KIND_UNTYPED_INT:
+    return "integer literal";
+  case TYPE_KIND_UNTYPED_FLOAT:
+    return "float literal";
+
+  case TYPE_KIND_ERROR:
+  case TYPE_KIND_U8:
+  case TYPE_KIND_U16:
+  case TYPE_KIND_U32:
+  case TYPE_KIND_U64:
+  case TYPE_KIND_I8:
+  case TYPE_KIND_I16:
+  case TYPE_KIND_I32:
+  case TYPE_KIND_I64:
+  case TYPE_KIND_BOOL:
+  case TYPE_KIND_F32:
+  case TYPE_KIND_F64:
+  case TYPE_KIND_NULL:
+  case TYPE_KIND_VOID:
+  case TYPE_KIND_UNDEF:
+  case TYPE_KIND_POINTER:
+  case TYPE_KIND_ARRAY:
+  case TYPE_KIND_SLICE:
+  case TYPE_KIND_FUNCTION:
+    return type->name;
+  }
+
+  UNREACHABLE("unhandled type kind");
+}
+
 bool type_int_fits(Type *type, int64_t value) {
   switch (type->kind) {
   case TYPE_KIND_U8:

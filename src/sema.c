@@ -14,14 +14,14 @@
 #include <stdio.h>
 #include <string.h>
 
-static void sema_error(SemaContext *ctx, SourceLoc loc, const char *message, ...) {
+__attribute__((format(printf, 3, 4))) static void sema_error(SemaContext *ctx, SourceLoc loc, const char *format, ...) {
   ctx->comp_unit->had_error = true;
 
   va_list args;
-  va_start(args, message);
+  va_start(args, format);
 
   fprintf(stderr, "[line %u] Error: ", loc.line);
-  vfprintf(stderr, message, args);
+  vfprintf(stderr, format, args);
   fprintf(stderr, "\n");
 
   va_end(args);
@@ -115,6 +115,12 @@ static Symbol *scope_lookup_type_name(SemaContext *ctx, const char *name) {
 
 static Symbol *scope_lookup_current(SemaContext *ctx, const char *name) {
   return scope_find(ctx, ctx->current_scope, name);
+}
+
+// The line where `name` was first declared in the current scope, for "Previous declaration" notes; 0 if it is unknown.
+static uint32_t previous_declaration_line(SemaContext *ctx, const char *name) {
+  Symbol *existing = scope_lookup_current(ctx, st_intern(&ctx->comp_unit->intern_table, name));
+  return existing ? existing->loc.line : 0;
 }
 
 static Symbol *scope_insert_type(SemaContext *ctx, const char *name, Type *type, SourceLoc loc) {
@@ -365,11 +371,12 @@ static void sema_concretize(SemaContext *ctx, AstExpr *expr, Type *target) {
     if (type_is_integer(target) && !type_is_internal(target) && sema_int_literal(expr, &value) &&
         !type_int_fits(target, value)) {
       if (expr->expr_literal.kind != AST_LITERAL_CHAR) {
-        sema_error(ctx, expr->loc, "Value %ld does not fit in '%s'", value, target->name);
+        sema_error(ctx, expr->loc, "Value %ld does not fit in '%s'", value, type_display_name(target));
       } else if (value >= 32 && value < 127) {
-        sema_error(ctx, expr->loc, "Character '%c' (%ld) does not fit in '%s'", (char)value, value, target->name);
+        sema_error(
+          ctx, expr->loc, "Character '%c' (%ld) does not fit in '%s'", (char)value, value, type_display_name(target));
       } else {
-        sema_error(ctx, expr->loc, "Character U+%04lX does not fit in '%s'", value, target->name);
+        sema_error(ctx, expr->loc, "Character U+%04lX does not fit in '%s'", value, type_display_name(target));
       }
     }
     break;
@@ -425,12 +432,12 @@ static Type *sema_array_of(SemaContext *ctx, SourceLoc loc, Type *elem_type, uin
   }
 
   if (elem_type->size == 0) {
-    sema_error(ctx, loc, "Cannot make an array of '%s'", elem_type->name);
+    sema_error(ctx, loc, "Cannot make an array of '%s'", type_display_name(elem_type));
     return type_error;
   }
 
   if (length > ARRAY_MAX_SIZE / elem_type->size) {
-    sema_error(ctx, loc, "Array of %llu '%s' is too large", (unsigned long long)length, elem_type->name);
+    sema_error(ctx, loc, "Array of %llu '%s' is too large", (unsigned long long)length, type_display_name(elem_type));
     return type_error;
   }
 
@@ -578,8 +585,12 @@ static bool sema_literal_value_coerce(SemaContext *ctx, AstExpr **slot, Type *ty
   }
 
   if (!type_can_widen_to(type, elem_type)) {
-    sema_error(
-      ctx, (*slot)->loc, "Array element %u of type '%s' cannot convert to '%s'", i, type->name, elem_type->name);
+    sema_error(ctx,
+               (*slot)->loc,
+               "Array element %u of type '%s' cannot convert to '%s'",
+               i,
+               type_display_name(type),
+               type_display_name(elem_type));
     return false;
   }
 
@@ -616,7 +627,7 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
 
   if (hint) {
     if (!type_is_array(hint)) {
-      sema_error(ctx, expr->loc, "Cannot convert an array literal to '%s'", hint->name);
+      sema_error(ctx, expr->loc, "Cannot convert an array literal to '%s'", type_display_name(hint));
       return type_error;
     }
 
@@ -626,7 +637,7 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
                  expr->loc,
                  "Array literal has %lld elements, but '%s' has %u",
                  (long long)length,
-                 hint->name,
+                 type_display_name(hint),
                  hint->array.length);
       return type_error;
     }
@@ -643,8 +654,12 @@ static Type *sema_expr_array_literal(SemaContext *ctx, AstExpr *expr, Type *hint
 
       Type *common_type = !elem_type || type_equals(elem_type, type) ? type : type_common(elem_type, type);
       if (!common_type) {
-        sema_error(
-          ctx, value->loc, "Array element %u of type '%s' does not match '%s'", i, type->name, elem_type->name);
+        sema_error(ctx,
+                   value->loc,
+                   "Array element %u of type '%s' does not match '%s'",
+                   i,
+                   type_display_name(type),
+                   type_display_name(elem_type));
         return type_error;
       }
 
@@ -702,12 +717,12 @@ static Type *sema_expr_deref(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (operand_type->kind != TYPE_KIND_POINTER) {
-    sema_error(ctx, expr->loc, "Cannot dereference non-pointer type '%s'", operand_type->name);
+    sema_error(ctx, expr->loc, "Cannot dereference non-pointer type '%s'", type_display_name(operand_type));
     return type_error;
   }
 
   if (!type_has_storage(operand_type->pointer.base_type)) {
-    sema_error(ctx, expr->loc, "Cannot dereference '%s'", operand_type->name);
+    sema_error(ctx, expr->loc, "Cannot dereference '%s'", type_display_name(operand_type));
     return type_error;
   }
 
@@ -724,12 +739,12 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (!type_is_array_like(target_type)) {
-    sema_error(ctx, expr->loc, "Cannot subscript non-array type '%s'", target_type->name);
+    sema_error(ctx, expr->loc, "Cannot subscript non-array type '%s'", type_display_name(target_type));
     return type_error;
   }
 
   if (!type_is_integer(index_type)) {
-    sema_error(ctx, expr->loc, "Array index must be an integer, got '%s'", index_type->name);
+    sema_error(ctx, expr->loc, "Array index must be an integer, got '%s'", type_display_name(index_type));
     return type_error;
   }
 
@@ -742,7 +757,7 @@ static Type *sema_expr_subscript(SemaContext *ctx, AstExpr *expr) {
                expr->expr_subscript.index->loc,
                "Array index %lld is out of bounds for '%s'",
                (long long)index_value,
-               target_type->name);
+               type_display_name(target_type));
     return type_error;
   }
 
@@ -762,7 +777,7 @@ static bool sema_slice_bound(SemaContext *ctx, AstExpr **slot, const char *which
   }
 
   if (!type_is_integer(type)) {
-    sema_error(ctx, (*slot)->loc, "Slice %s index must be an integer, got '%s'", which, type->name);
+    sema_error(ctx, (*slot)->loc, "Slice %s index must be an integer, got '%s'", which, type_display_name(type));
     return false;
   }
 
@@ -793,7 +808,7 @@ static bool sema_check_slice_bounds(SemaContext *ctx, AstExpr *expr, Type *targe
                  "Slice %s index %lld is out of bounds for '%s'",
                  names[i],
                  (long long)values[i],
-                 target_type->name);
+                 type_display_name(target_type));
       return false;
     }
   }
@@ -820,7 +835,7 @@ static Type *sema_expr_slice(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (!type_is_array_like(target_type)) {
-    sema_error(ctx, expr->loc, "Cannot slice non-array type '%s'", target_type->name);
+    sema_error(ctx, expr->loc, "Cannot slice non-array type '%s'", type_display_name(target_type));
     return type_error;
   }
 
@@ -860,7 +875,8 @@ static Type *sema_expr_member(SemaContext *ctx, AstExpr *expr) {
   bool found = type_find_field(&ctx->comp_unit->arena, object_type, expr->expr_member.member, &field);
 
   if (!found) {
-    sema_error(ctx, expr->loc, "Type '%s' has no member named '%s'", object_type->name, expr->expr_member.member);
+    sema_error(
+      ctx, expr->loc, "Type '%s' has no member named '%s'", type_display_name(object_type), expr->expr_member.member);
     return type_error;
   }
 
@@ -895,7 +911,11 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (func_sym->kind != SYMBOL_FUNCTION) {
-    sema_error(ctx, expr->loc, "Expected function, got %s", callee->expr_identifier.name);
+    sema_error(ctx,
+               expr->loc,
+               "'%s' is a %s, not a function",
+               callee->expr_identifier.name,
+               func_sym->kind == SYMBOL_TYPE ? "type" : "variable");
     sema_call_arguments(ctx, expr);
     return type_error;
   }
@@ -933,8 +953,8 @@ static Type *sema_expr_call(SemaContext *ctx, AstExpr *expr) {
                  "Argument %u of function '%s' expects type '%s', but got '%s'",
                  i + 1,
                  callee->expr_identifier.name,
-                 expected_type->name,
-                 arg_type->name);
+                 type_display_name(expected_type),
+                 type_display_name(arg_type));
       arguments_ok = false;
       continue;
     }
@@ -956,7 +976,8 @@ static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
   switch (expr->expr_unary.op) {
   case UNOP_NEGATE:
     if (!type_is_numeric(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '-' operator requires numeric type");
+      sema_error(
+        ctx, expr->loc, "Unary '-' operator requires a numeric type, got '%s'", type_display_name(operand_type));
       return type_error;
     }
 
@@ -964,7 +985,7 @@ static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
 
   case UNOP_NOT:
     if (!type_is_bool(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type");
+      sema_error(ctx, expr->loc, "Unary '!' operator requires 'bool' type, got '%s'", type_display_name(operand_type));
       return type_error;
     }
 
@@ -972,7 +993,8 @@ static Type *sema_expr_unary(SemaContext *ctx, AstExpr *expr) {
 
   case UNOP_BIT_NOT:
     if (!type_is_integer(operand_type)) {
-      sema_error(ctx, expr->loc, "Unary '~' operator requires integer type");
+      sema_error(
+        ctx, expr->loc, "Unary '~' operator requires an integer type, got '%s'", type_display_name(operand_type));
       return type_error;
     }
 
@@ -1000,7 +1022,8 @@ static Type *sema_pointer_arithmetic(SemaContext *ctx, AstExpr *expr, Type *left
 
   Type *ptr_type = left_is_ptr ? left_type : right_type;
   if (!type_has_storage(ptr_type->pointer.base_type)) {
-    sema_error(ctx, expr->loc, "Cannot do arithmetic on a pointer to '%s'", ptr_type->pointer.base_type->name);
+    sema_error(
+      ctx, expr->loc, "Cannot do arithmetic on a pointer to '%s'", type_display_name(ptr_type->pointer.base_type));
     return type_error;
   }
 
@@ -1011,7 +1034,8 @@ static Type *sema_pointer_arithmetic(SemaContext *ctx, AstExpr *expr, Type *left
     }
 
     if (!type_equals(left_type, right_type)) {
-      sema_error(ctx, expr->loc, "Cannot subtract '%s' from '%s'", right_type->name, left_type->name);
+      sema_error(
+        ctx, expr->loc, "Cannot subtract '%s' from '%s'", type_display_name(right_type), type_display_name(left_type));
       return type_error;
     }
 
@@ -1019,13 +1043,13 @@ static Type *sema_pointer_arithmetic(SemaContext *ctx, AstExpr *expr, Type *left
   }
 
   if (right_is_ptr && op == BINOP_SUB) {
-    sema_error(ctx, expr->loc, "Cannot subtract a pointer from '%s'", left_type->name);
+    sema_error(ctx, expr->loc, "Cannot subtract a pointer from '%s'", type_display_name(left_type));
     return type_error;
   }
 
   Type *offset_type = left_is_ptr ? right_type : left_type;
   if (!type_is_integer(offset_type)) {
-    sema_error(ctx, expr->loc, "Pointer arithmetic needs an integer offset, got '%s'", offset_type->name);
+    sema_error(ctx, expr->loc, "Pointer arithmetic needs an integer offset, got '%s'", type_display_name(offset_type));
     return type_error;
   }
 
@@ -1053,14 +1077,21 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
     }
 
     if (!type_is_numeric(left_type) || !type_is_numeric(right_type)) {
-      sema_error(ctx, expr->loc, "Arithmetic operators require numeric operands");
+      sema_error(ctx,
+                 expr->loc,
+                 "Arithmetic operators require numeric operands, got '%s' and '%s'",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
     Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
-      sema_error(
-        ctx, expr->loc, "Incompatible types for arithmetic (got '%s' and '%s')", left_type->name, right_type->name);
+      sema_error(ctx,
+                 expr->loc,
+                 "Incompatible types for arithmetic (got '%s' and '%s')",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
@@ -1083,13 +1114,17 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_NOT_EQ: {
     if (!type_is_comparable(left_type) || !type_is_comparable(right_type)) {
       Type *bad_type = type_is_comparable(left_type) ? right_type : left_type;
-      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", bad_type->name);
+      sema_error(ctx, expr->loc, "Type '%s' cannot be compared for equality", type_display_name(bad_type));
       return type_error;
     }
 
     Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
-      sema_error(ctx, expr->loc, "Incompatible types for equality: '%s' and '%s'", left_type->name, right_type->name);
+      sema_error(ctx,
+                 expr->loc,
+                 "Incompatible types for equality: '%s' and '%s'",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
@@ -1104,13 +1139,18 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_LESS_EQ:
   case BINOP_GREATER_EQ: {
     if (!type_is_orderable(left_type) || !type_is_orderable(right_type)) {
-      sema_error(ctx, expr->loc, "Comparisons require ordered types");
+      sema_error(ctx,
+                 expr->loc,
+                 "Comparisons require ordered types, got '%s' and '%s'",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
     Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
-      sema_error(ctx, expr->loc, "Cannot compare '%s' with '%s'", left_type->name, right_type->name);
+      sema_error(
+        ctx, expr->loc, "Cannot compare '%s' with '%s'", type_display_name(left_type), type_display_name(right_type));
       return type_error;
     }
 
@@ -1124,14 +1164,21 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_BIT_XOR:
   case BINOP_BIT_AND: {
     if (!type_is_integer(left_type) || !type_is_integer(right_type)) {
-      sema_error(ctx, expr->loc, "Bitwise operators require integer operands");
+      sema_error(ctx,
+                 expr->loc,
+                 "Bitwise operators require integer operands, got '%s' and '%s'",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
     Type *common_type = type_common(left_type, right_type);
     if (!common_type) {
-      sema_error(
-        ctx, expr->loc, "Incompatible types for bitwise operation: '%s' and '%s'", left_type->name, right_type->name);
+      sema_error(ctx,
+                 expr->loc,
+                 "Incompatible types for bitwise operation: '%s' and '%s'",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
@@ -1146,7 +1193,11 @@ static Type *sema_expr_binary(SemaContext *ctx, AstExpr *expr) {
   case BINOP_SHL:
   case BINOP_SHR: {
     if (!type_is_integer(left_type) || !type_is_integer(right_type)) {
-      sema_error(ctx, expr->loc, "Shift operators require integer operands");
+      sema_error(ctx,
+                 expr->loc,
+                 "Shift operators require integer operands, got '%s' and '%s'",
+                 type_display_name(left_type),
+                 type_display_name(right_type));
       return type_error;
     }
 
@@ -1172,7 +1223,11 @@ static Type *sema_expr_logical(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (!type_is_bool(left_type) || !type_is_bool(right_type)) {
-    sema_error(ctx, expr->loc, "Logical operators require 'bool' operands");
+    sema_error(ctx,
+               expr->loc,
+               "Logical operators require 'bool' operands, got '%s' and '%s'",
+               type_display_name(left_type),
+               type_display_name(right_type));
     return type_error;
   }
 
@@ -1226,11 +1281,11 @@ static Type *sema_expr_cast(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (to == type_bool && type_is_numeric(from)) {
-    sema_error(ctx, expr->loc, "Cannot cast from '%s' to 'bool'. Use x != 0", from->name);
+    sema_error(ctx, expr->loc, "Cannot cast from '%s' to 'bool'. Use x != 0", type_display_name(from));
     return type_error;
   }
 
-  sema_error(ctx, expr->loc, "Cannot cast from '%s' to '%s'", from->name, to->name);
+  sema_error(ctx, expr->loc, "Cannot cast from '%s' to '%s'", type_display_name(from), type_display_name(to));
   return type_error;
 }
 
@@ -1273,7 +1328,8 @@ static Type *sema_expr_assignment(SemaContext *ctx, AstExpr *expr) {
   }
 
   if (!type_can_widen_to(value_type, target_type)) {
-    sema_error(ctx, expr->loc, "Cannot assign '%s' to '%s'", value_type->name, target_type->name);
+    sema_error(
+      ctx, expr->loc, "Cannot assign '%s' to '%s'", type_display_name(value_type), type_display_name(target_type));
     return type_error;
   }
 
@@ -1426,7 +1482,7 @@ static Type *sema_inferred_array_type(SemaContext *ctx, AstType *type, AstExpr *
   }
 
   if (!type_is_array(init_type)) {
-    sema_error(ctx, initializer->loc, "Cannot initialize array with non-array type '%s'", init_type->name);
+    sema_error(ctx, initializer->loc, "Cannot initialize array with non-array type '%s'", type_display_name(init_type));
     return type_error;
   }
 
@@ -1472,12 +1528,20 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
   }
 
   if (!type_has_storage(var_type)) {
-    sema_error(ctx, stmt->loc, "Cannot declare variable '%s' of type '%s'", stmt->stmt_local_var.name, var_type->name);
+    sema_error(ctx,
+               stmt->loc,
+               "Cannot declare variable '%s' of type '%s'",
+               stmt->stmt_local_var.name,
+               type_display_name(var_type));
     var_type = type_error;
   }
 
   if (expected_type && init_type && !is_undef && !type_can_widen_to(init_type, var_type)) {
-    sema_error(ctx, stmt->loc, "Cannot implicitly convert '%s' to '%s'", init_type->name, var_type->name);
+    sema_error(ctx,
+               stmt->loc,
+               "Cannot implicitly convert '%s' to '%s'",
+               type_display_name(init_type),
+               type_display_name(var_type));
 
     scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, type_error, stmt->loc);
     return;
@@ -1494,7 +1558,11 @@ static void sema_stmt_local_var(SemaContext *ctx, AstStmt *stmt) {
   Symbol *sym = scope_insert(ctx, stmt->stmt_local_var.name, SYMBOL_LOCAL_VAR, var_type, stmt->loc);
   if (!sym) {
     if (!reuses_type_name) {
-      sema_error(ctx, stmt->loc, "Redeclaration of '%s' in current scope", stmt->stmt_local_var.name);
+      sema_error(ctx,
+                 stmt->loc,
+                 "Redeclaration of '%s' in current scope. Previous declaration at line %u",
+                 stmt->stmt_local_var.name,
+                 previous_declaration_line(ctx, stmt->stmt_local_var.name));
     }
     return;
   }
@@ -1520,8 +1588,8 @@ static void sema_stmt_return(SemaContext *ctx, AstStmt *stmt) {
                stmt->loc,
                "Function '%s' expects return type '%s', but got incompatible '%s'",
                ctx->current_function->name,
-               expected_type->name,
-               actual_type->name);
+               type_display_name(expected_type),
+               type_display_name(actual_type));
     return;
   }
 
@@ -1545,7 +1613,10 @@ static void sema_stmt_continue(SemaContext *ctx, AstStmt *stmt) {
 static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_if.condition);
   if (cond_type != type_bool && cond_type != type_error) {
-    sema_error(ctx, stmt->stmt_if.condition->loc, "Condition in 'if' must be of type 'bool'");
+    sema_error(ctx,
+               stmt->stmt_if.condition->loc,
+               "Condition in 'if' must be of type 'bool', got '%s'",
+               type_display_name(cond_type));
   }
 
   sema_stmt(ctx, stmt->stmt_if.then_branch);
@@ -1557,7 +1628,10 @@ static void sema_stmt_if(SemaContext *ctx, AstStmt *stmt) {
 static void sema_stmt_while(SemaContext *ctx, AstStmt *stmt) {
   Type *cond_type = sema_expr(ctx, stmt->stmt_while.condition);
   if (cond_type != type_bool && cond_type != type_error) {
-    sema_error(ctx, stmt->stmt_while.condition->loc, "Condition in 'while' must be of type 'bool'");
+    sema_error(ctx,
+               stmt->stmt_while.condition->loc,
+               "Condition in 'while' must be of type 'bool', got '%s'",
+               type_display_name(cond_type));
   }
 
   ctx->loop_depth++;
@@ -1615,7 +1689,7 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
                  func_decl->params[i].loc,
                  "Cannot declare parameter '%s' of type '%s'",
                  func_decl->params[i].name,
-                 param_types[i]->name);
+                 type_display_name(param_types[i]));
       param_types[i] = type_error;
     }
   }
@@ -1634,7 +1708,11 @@ static void sema_pass1_decl_function(SemaContext *ctx, AstDecl *decl) {
 
   Symbol *sym = scope_insert(ctx, func_decl->name, SYMBOL_FUNCTION, func_type, decl->loc);
   if (!sym) {
-    sema_error(ctx, decl->loc, "Redeclaration of function '%s' in current scope", func_decl->name);
+    sema_error(ctx,
+               decl->loc,
+               "Redeclaration of function '%s' in current scope. Previous declaration at line %u",
+               func_decl->name,
+               previous_declaration_line(ctx, func_decl->name));
 
     const char *sym_name = st_intern(&ctx->comp_unit->intern_table, func_decl->name);
     sym = symbol_new(ctx, sym_name, SYMBOL_FUNCTION, func_type, decl->loc);
@@ -1688,7 +1766,12 @@ static void sema_pass2_decl_function(SemaContext *ctx, AstDecl *decl) {
     Symbol *sym = scope_insert(ctx, param->name, SYMBOL_LOCAL_VAR, param_type, param->loc);
 
     if (!sym) {
-      sema_error(ctx, param->loc, "Redeclaration of parameter '%s' in function '%s'", param->name, func_decl->name);
+      sema_error(ctx,
+                 param->loc,
+                 "Redeclaration of parameter '%s' in function '%s'. Previous declaration at line %u",
+                 param->name,
+                 func_decl->name,
+                 previous_declaration_line(ctx, param->name));
       continue;
     }
 
@@ -1768,7 +1851,8 @@ static Type *sema_type_array(SemaContext *ctx, AstType *type) {
   }
 
   if (!type_is_integer(size_type)) {
-    sema_error(ctx, type->array.length_expr->loc, "Array size must be an integer, got '%s'", size_type->name);
+    sema_error(
+      ctx, type->array.length_expr->loc, "Array size must be an integer, got '%s'", type_display_name(size_type));
     return type_error;
   }
 

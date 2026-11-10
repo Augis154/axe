@@ -324,7 +324,12 @@ Token lexer_get_token(Lexer *lex) {
   }
 
   char error_msg[64];
-  snprintf(error_msg, sizeof(error_msg), "Unexpected character: '%c'", c);
+
+  if (c >= 0x20 && c < 0x7F) {
+    snprintf(error_msg, sizeof(error_msg), "Unexpected character: '%c'", c);
+  } else {
+    snprintf(error_msg, sizeof(error_msg), "Unexpected byte: 0x%02X", (unsigned)(unsigned char)c);
+  }
 
   return error_token(lex, error_msg);
 }

@@ -7,6 +7,7 @@
 #include "token.h"
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,8 +47,9 @@ static const ParseRule *get_rule(TokenKind kind) {
   return &rules[kind];
 }
 
-// Reports a parse error at `token` and enters panic mode; further errors are suppressed until synchronize.
-static void error_at(Parser *parser, Token token, const char *message) {
+// Reports a parse error at `token` and enters panic mode; further errors are suppressed until synchronize. `format`
+// and the arguments after it work like printf.
+__attribute__((format(printf, 3, 4))) static void error_at(Parser *parser, Token token, const char *format, ...) {
   if (parser->panic_mode) return;
 
   parser->panic_mode = true;
@@ -63,7 +65,14 @@ static void error_at(Parser *parser, Token token, const char *message) {
     fprintf(stderr, " at '%.*s'", (int)token.lexeme_len, token.lexeme);
   }
 
-  fprintf(stderr, ": %s\n", message);
+  fprintf(stderr, ": ");
+
+  va_list args;
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+
+  fprintf(stderr, "\n");
 }
 
 // Moves to the next token, reporting and skipping lexer error tokens.
@@ -77,7 +86,7 @@ static void advance(Parser *parser) {
       break;
     }
 
-    error_at(parser, parser->current, parser->current.lexeme);
+    error_at(parser, parser->current, "%s", parser->current.lexeme);
     free((void *)parser->current.lexeme);
   }
 }
@@ -94,7 +103,7 @@ static bool match(Parser *parser, TokenKind kind) {
 
 static bool consume(Parser *parser, TokenKind kind, const char *message) {
   if (match(parser, kind)) return true;
-  error_at(parser, parser->previous, message);
+  error_at(parser, parser->previous, "%s", message);
   return false;
 }
 
@@ -258,7 +267,7 @@ static bool decode_escape(Parser *parser, const char **cursor, const char *end, 
   if (is_unicode) *is_unicode = false;
 
   if (*cursor >= end) {
-    error_at(parser, parser->previous, "Invalid escape sequence");
+    error_at(parser, parser->previous, "Incomplete escape sequence at the end of the literal.");
     return false;
   }
 
@@ -309,7 +318,14 @@ static bool decode_escape(Parser *parser, const char **cursor, const char *end, 
     break;
   }
 
-  error_at(parser, parser->previous, "Invalid escape sequence");
+  if (c == 'x') {
+    error_at(parser, parser->previous, "Invalid '\\x' escape; expected two hex digits.");
+  } else if (c == 'u') {
+    error_at(parser, parser->previous, "Invalid '\\u' escape; expected '\\u{...}' with a valid code point.");
+  } else {
+    error_at(parser, parser->previous, "Unknown escape sequence '\\%c'.", c);
+  }
+
   return false;
 }
 
@@ -328,7 +344,7 @@ static const char *escape_str(Parser *parser, const char *str, size_t str_len, s
       uint32_t code_point;
 
       if (!decode_utf8_char(&cursor, end, &code_point)) {
-        error_at(parser, parser->previous, "Invalid UTF-8 in string literal");
+        error_at(parser, parser->previous, "Invalid UTF-8 in string literal.");
         return NULL;
       }
 
@@ -512,7 +528,7 @@ static AstExpr *parse_char_literal(Parser *parser) {
   const char *end = parser->previous.lexeme + parser->previous.lexeme_len - 1;
 
   if (cursor == end) {
-    error_at(parser, parser->previous, "Empty character literal");
+    error_at(parser, parser->previous, "Empty character literal.");
     return NULL;
   }
 
@@ -525,12 +541,12 @@ static AstExpr *parse_char_literal(Parser *parser) {
       return NULL;
     }
   } else if (!decode_utf8_char(&cursor, end, &code_point)) {
-    error_at(parser, parser->previous, "Invalid UTF-8 in character literal");
+    error_at(parser, parser->previous, "Invalid UTF-8 in character literal.");
     return NULL;
   }
 
   if (cursor != end) {
-    error_at(parser, parser->previous, "A character literal must hold a single character");
+    error_at(parser, parser->previous, "A character literal must hold a single character.");
     return NULL;
   }
 
@@ -555,7 +571,7 @@ static AstExpr *parse_string_literal(Parser *parser) {
   }
 
   if (escaped_len > UINT32_MAX) {
-    error_at(parser, parser->previous, "String literal is too long");
+    error_at(parser, parser->previous, "String literal is too long.");
     arena_rollback(&parser->comp_unit->arena, mark);
     return NULL;
   }
@@ -630,7 +646,7 @@ static AstExpr *parse_array_literal(Parser *parser) {
     array_literal_expr->expr_array_literal.repeat.length_expr = parse_expression(parser);
     if (!array_literal_expr->expr_array_literal.repeat.length_expr) return NULL;
 
-    consume(parser, TOKEN_RBRACKET, "Expected ']'");
+    consume(parser, TOKEN_RBRACKET, "Expected ']' after array repeat length.");
     return array_literal_expr;
   }
 
@@ -663,7 +679,7 @@ static AstExpr *parse_array_literal(Parser *parser) {
     if (!first) return NULL;
   }
 
-  consume(parser, TOKEN_RBRACKET, "Expected ']'");
+  consume(parser, TOKEN_RBRACKET, "Expected ']' after array elements.");
 
   AstArrayElement *element_array =
     arena_copy_array(&parser->comp_unit->arena, elements, da_len(elements), sizeof(AstArrayElement));
@@ -679,7 +695,7 @@ static AstExpr *parse_array_literal(Parser *parser) {
 static AstExpr *parse_grouping(Parser *parser) {
   AstExpr *expr = parse_expression(parser);
 
-  consume(parser, TOKEN_RPAREN, "Expected ')' after expression");
+  consume(parser, TOKEN_RPAREN, "Expected ')' after expression.");
 
   return expr;
 }
@@ -915,7 +931,7 @@ static AstStmt *parse_expression_statement(Parser *parser) {
 
   AstExpr *expr = parse_expression(parser);
 
-  consume(parser, TOKEN_SEMICOLON, "Expected ';' after expression");
+  consume(parser, TOKEN_SEMICOLON, "Expected ';' after expression.");
 
   AstStmt *stmt = ast_stmt_new(&parser->comp_unit->arena, AST_STMT_EXPRESSION, start_loc);
   stmt->stmt_expression.expression = expr;
@@ -934,7 +950,11 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
   if (match(parser, TOKEN_COLON)) {
     type_spec = parse_type(parser);
     if (!type_spec) {
-      error_at(parser, parser->previous, "Expected type after ':' in variable declaration.");
+      error_at(parser,
+               parser->previous,
+               "Expected type after ':' in declaration of variable '%.*s'.",
+               (int)name_token.lexeme_len,
+               name_token.lexeme);
     }
   }
 
@@ -946,7 +966,11 @@ static AstStmt *parse_variable_declaration(Parser *parser) {
   consume(parser, TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
 
   if (!type_spec && !init_expr) {
-    error_at(parser, name_token, "Variable declaration must have either a type annotation or an initializer.");
+    error_at(parser,
+             name_token,
+             "Variable '%.*s' must have either a type annotation or an initializer.",
+             (int)name_token.lexeme_len,
+             name_token.lexeme);
     return NULL;
   }
 
@@ -1077,7 +1101,7 @@ static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
     consume(parser, TOKEN_COLON, "Expected ':' after parameter name.");
     AstType *param_type = parse_type(parser);
     if (!param_type) {
-      error_at(parser, parser->previous, "Expected type for parameter.");
+      error_at(parser, parser->previous, "Expected type for parameter '%s'.", param_name);
       return NULL;
     }
 
@@ -1103,7 +1127,7 @@ static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
   if (match(parser, TOKEN_COLON)) {
     return_type = parse_type(parser);
     if (!return_type) {
-      error_at(parser, parser->previous, "Expected return type after ':' in function declaration.");
+      error_at(parser, parser->previous, "Expected return type after ':' in declaration of function '%s'.", func_name);
     }
   }
 
@@ -1112,7 +1136,7 @@ static AstDecl *parse_function_declaration(Parser *parser, bool is_extern) {
   if (is_extern) {
     consume(parser, TOKEN_SEMICOLON, "Expected ';' after extern function declaration.");
   } else if (check(parser, TOKEN_SEMICOLON)) {
-    error_at(parser, parser->previous, "Function has no body; add one or declare it 'extern'.");
+    error_at(parser, parser->previous, "Function '%s' has no body; add one or declare it 'extern'.", func_name);
     return NULL;
   } else {
     func_body = parse_block(parser);
